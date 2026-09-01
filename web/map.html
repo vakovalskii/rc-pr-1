@@ -28,7 +28,7 @@
     <img id="view" alt="">
     <div class="leg">
       <div><i style="background:#e1e4e8"></i>свободно &nbsp; <i style="background:#141418;border:1px solid #444"></i>препятствие &nbsp; <i style="background:#282c34;border:1px solid #444"></i>неизвестно</div>
-      <div><i style="background:#60a5fa"></i>кадры съёмки &nbsp; <i style="background:#4ade80"></i>машинка &nbsp; <i style="background:#f87171"></i>удар</div>
+      <div><i style="background:#60a5fa"></i>кадры съёмки &nbsp; <i style="background:#4ade80"></i>машинка &nbsp; <i style="background:#f87171"></i>удар &nbsp; <i style="background:#fb923c"></i>препятствие</div>
     </div>
   </div>
 </div>
@@ -62,6 +62,9 @@ function draw(){
   if (trail.length) {
     g.strokeStyle = 'rgba(74,222,128,.7)'; g.lineWidth = 2; g.beginPath();
     trail.forEach(([x, y], i) => { const [a, b] = P(x, y); i ? g.lineTo(a, b) : g.moveTo(a, b); }); g.stroke();
+  }
+  for (const [ox, oy, orad] of (tele && tele.obstacles || [])) {
+    const [a, b] = P(ox, oy); g.fillStyle = '#fb923c'; g.beginPath(); g.arc(a, b, orad / meta.res * k, 0, 7); g.fill();
   }
   if (tele) {
     const [x, y] = P(tele.x, tele.y), R = r * 2.5;

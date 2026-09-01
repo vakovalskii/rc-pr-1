@@ -187,6 +187,9 @@ function drawMini(t){
   g.strokeStyle = 'rgba(96,165,250,.8)'; g.lineWidth = 1; g.beginPath();
   trail.forEach(([x, y], i) => { const [a, b] = P(x, y); i ? g.lineTo(a, b) : g.moveTo(a, b); });
   g.stroke();
+  for (const [ox, oy, orad] of (t.obstacles || [])) {
+    const [a, b] = P(ox, oy); g.fillStyle = '#fb923c'; g.beginPath(); g.arc(a, b, Math.max(2, orad / mapMeta.res * k), 0, 7); g.fill();
+  }
   const [cx, cy] = P(t.x, t.y), r = 5;
   g.fillStyle = t.collision ? '#f87171' : '#4ade80'; g.beginPath();
   g.moveTo(cx + r * Math.cos(-t.yaw), cy + r * Math.sin(-t.yaw));

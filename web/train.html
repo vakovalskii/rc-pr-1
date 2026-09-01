@@ -1,0 +1,135 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Обучение</title>
+<style>
+  :root{--bg:#0f1115;--fg:#e8e9ed;--dim:#8b93a1;--acc:#60a5fa;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24}
+  html,body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+  #wrap{max-width:1100px;margin:0 auto;padding:16px}
+  h1{font-size:15px;margin:0 0 4px;color:var(--acc)} .sub{color:var(--dim);margin-bottom:14px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px} @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  .card{background:#151922;border:1px solid #2a3040;border-radius:8px;padding:10px}
+  .card h2{font-size:12px;margin:0 0 6px;color:var(--dim);font-weight:500}
+  canvas{width:100%;height:220px;display:block}
+  .stat{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0 14px} .stat div{background:#151922;border:1px solid #2a3040;border-radius:6px;padding:6px 10px}
+  .stat b{color:var(--fg);font-weight:600} .stat span{color:var(--dim)}
+  .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-top:14px}
+  .gal .it{position:relative;background:#000;border-radius:6px;overflow:hidden}
+  .gal img{width:100%;display:block;opacity:.9}
+  .gal canvas{position:absolute;inset:0;width:100%;height:100%}
+  .leg{color:var(--dim);margin-top:8px} .leg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+  .live{color:var(--warn)} .done{color:var(--ok)}
+  .tbl table{width:100%;border-collapse:collapse;font-size:12px} .tbl td,.tbl th{padding:3px 6px;border-bottom:1px solid #1f2530;text-align:left;white-space:nowrap}
+  .tbl th{color:var(--dim);font-weight:500} .tbl tr.cur td{color:var(--acc)} .tbl a{color:var(--acc);text-decoration:none}
+</style>
+<div id="wrap">
+  <h1>Обучение политики</h1>
+  <div class="sub" id="sub">жду models/bc.json …</div>
+  <div class="stat">
+    <div><span>статус </span><b id="st">—</b></div>
+    <div><span>эпоха </span><b id="ep">—</b></div>
+    <div><span>кадров </span><b id="n">—</b></div>
+    <div><span>MAE руля </span><b id="ms">—</b> <span>(всегда-среднее <b id="bs">—</b>)</span></div>
+    <div><span>MAE газа </span><b id="mt">—</b> <span>(<b id="bt">—</b>)</span></div>
+    <div><span>лучшая эпоха </span><b id="best">—</b></div>
+  </div>
+  <div class="grid">
+    <div class="card"><h2>ошибка руля на валидации по эпохам (пунктир — «всегда среднее»: ниже него = учится)</h2><canvas id="c1"></canvas></div>
+    <div class="card"><h2>loss на обучении</h2><canvas id="c2"></canvas></div>
+  </div>
+  <div class="grid" style="margin-top:14px">
+    <div class="card"><h2>из чего состоит сеть</h2><div id="arch" class="tbl"></div><div id="ck" style="margin-top:8px;color:var(--dim)"></div></div>
+    <div class="card"><h2>история обучений (models/runs.jsonl) — клик открывает прогон</h2><div id="runs" class="tbl"></div>
+      <h2 style="margin-top:12px">история прогонов политики (models/evals.jsonl)</h2><div id="evals" class="tbl"></div></div>
+  </div>
+  <div class="leg"><i style="background:#4ade80"></i>метка эксперта &nbsp; <i style="background:#60a5fa"></i>предсказание модели &nbsp; — руль на кадрах валидации (лучшая эпоха)</div>
+  <div class="gal" id="gal"></div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const name = new URLSearchParams(location.search).get('model') || 'bc';
+let last = '';
+
+function plot(cv, series, opts){
+  const dpr = devicePixelRatio || 1; cv.width = cv.clientWidth * dpr; cv.height = cv.clientHeight * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  const W = cv.clientWidth, H = cv.clientHeight, L = 38, B = 22, T = 8, R = 8;
+  g.clearRect(0, 0, W, H);
+  const xs = series[0].data.map((_, i) => i + 1);
+  const all = series.flatMap(s => s.data).concat(opts.hline !== undefined ? [opts.hline] : []);
+  let lo = 0, hi = Math.max(...all) * 1.1 || 1;
+  const X = i => L + (W - L - R) * (xs.length > 1 ? (i) / (xs.length - 1) : 0.5);
+  const Y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+  g.strokeStyle = '#2a3040'; g.fillStyle = '#8b93a1'; g.font = '10px ui-monospace,monospace';
+  for (let k = 0; k <= 4; k++) { const v = lo + (hi - lo) * k / 4; g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(W - R, Y(v)); g.stroke(); g.fillText(v.toFixed(2), 2, Y(v) + 3); }
+  xs.forEach((x, i) => { if (xs.length <= 30 || i % 5 === 0) g.fillText(x, X(i) - 3, H - 6); });
+  if (opts.hline !== undefined) { g.setLineDash([5, 4]); g.strokeStyle = '#f87171'; g.beginPath(); g.moveTo(L, Y(opts.hline)); g.lineTo(W - R, Y(opts.hline)); g.stroke(); g.setLineDash([]); }
+  for (const s of series) {
+    g.strokeStyle = s.color; g.lineWidth = 2; g.beginPath();
+    s.data.forEach((v, i) => i ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v))); g.stroke();
+    g.fillStyle = s.color; s.data.forEach((v, i) => { g.beginPath(); g.arc(X(i), Y(v), 2.5, 0, 7); g.fill(); });
+  }
+  if (opts.best) { g.strokeStyle = '#4ade80'; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(X(opts.best - 1), T); g.lineTo(X(opts.best - 1), H - B); g.stroke(); g.setLineDash([]); }
+}
+
+function steerArrow(cv, s, color, y){
+  const g = cv.getContext('2d'); const W = cv.width, H = cv.height;
+  const x0 = W / 2, len = W * 0.4 * s;                      // + = вправо
+  g.strokeStyle = color; g.lineWidth = 4; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(x0, y); g.lineTo(x0 + len, y); g.stroke();
+  g.beginPath(); g.arc(x0, y, 3, 0, 7); g.fillStyle = color; g.fill();
+}
+
+async function tick(){
+  let m;
+  try { const r = await fetch(`/models/${name}.json?t=${Date.now()}`); if (!r.ok) throw 0; m = await r.json(); }
+  catch { $('#sub').textContent = `нет models/${name}.json — запусти train_bc.py`; return; }
+  const txt = JSON.stringify(m); if (txt === last) return; last = txt;
+  const h = m.history || [];
+  $('#sub').textContent = `${(m.datasets || []).join(', ')} · ${m.device || ''}`;
+  $('#st').innerHTML = m.status === 'done' ? '<span class="done">готово</span>' : m.status === 'training' ? '<span class="live">идёт…</span>' : (m.status || '—');
+  $('#ep').textContent = h.length ? `${h.length} / ${m.epochs}` : '—';
+  $('#n').textContent = `${m.train} + ${m.val} val`;
+  const lastH = h[h.length - 1];
+  $('#ms').textContent = lastH ? lastH.val_mae_steer.toFixed(3) : '—';
+  $('#mt').textContent = lastH ? lastH.val_mae_throttle.toFixed(3) : '—';
+  $('#bs').textContent = m.baseline_mae ? m.baseline_mae[0].toFixed(3) : '—';
+  $('#bt').textContent = m.baseline_mae ? m.baseline_mae[1].toFixed(3) : '—';
+  const best = h.map((e, i) => e.best ? i + 1 : 0).filter(Boolean).pop();
+  $('#best').textContent = best || '—';
+  if (h.length) {
+    plot($('#c1'), [{data: h.map(e => e.val_mae_steer), color: '#60a5fa'}, {data: h.map(e => e.val_mae_throttle), color: '#a78bfa'}],
+         {hline: m.baseline_mae ? m.baseline_mae[0] : undefined, best});
+    plot($('#c2'), [{data: h.map(e => e.loss), color: '#fbbf24'}], {});
+  }
+  // архитектура и чекпоинты
+  const mb = b => (b / 1e6).toFixed(2) + ' МБ';
+  if (m.arch) {
+    $('#arch').innerHTML = '<table><tr><th>слой</th><th>тип</th><th>выход</th><th>параметров</th></tr>' +
+      m.arch.map(r => `<tr><td>${r.layer}</td><td>${r.type}</td><td>${r.out.join('×')}</td><td>${r.params.toLocaleString()}</td></tr>`).join('') +
+      `<tr><td colspan="3"><b>итого</b> вход ${m.input[0]}×${m.input[1]}×3</td><td><b>${m.params.toLocaleString()}</b></td></tr></table>`;
+  }
+  $('#ck').innerHTML = (m.checkpoints || []).map(c => `${c.file} — ${c.role}, эпоха ${c.epoch}, ${mb(c.bytes)}`).join('<br>') +
+    (m.duration_s ? `<br>обучение ${m.duration_s} с, lr ${m.lr}, батч ${m.batch}, seed ${m.seed}` : '');
+  const gal = $('#gal'); gal.innerHTML = '';
+  for (const p of (m.preview || [])) {
+    const it = document.createElement('div'); it.className = 'it';
+    const img = new Image(); img.src = `/models/${m.preview_dir}/${p.img}?t=${Date.now()}`;
+    const cv = document.createElement('canvas'); cv.width = 240; cv.height = 180;
+    it.append(img, cv); gal.append(it);
+    steerArrow(cv, p.true[0], '#4ade80', 150); steerArrow(cv, p.pred[0], '#60a5fa', 165);
+    const g = cv.getContext('2d'); g.fillStyle = 'rgba(0,0,0,.6)'; g.fillRect(0, 0, 240, 16);
+    g.fillStyle = '#e8e9ed'; g.font = '11px ui-monospace,monospace';
+    g.fillText(`руль ${p.true[0].toFixed(2)} → ${p.pred[0].toFixed(2)}   газ ${p.true[1].toFixed(2)} → ${p.pred[1].toFixed(2)}`, 4, 12);
+  }
+}
+async function lines(url){ try { const r = await fetch(`${url}?t=${Date.now()}`); if (!r.ok) return []; return (await r.text()).trim().split('\n').filter(Boolean).map(JSON.parse); } catch { return []; } }
+async function history(){
+  const runs = await lines('/models/runs.jsonl'), evals = await lines('/models/evals.jsonl');
+  $('#runs').innerHTML = runs.length ? '<table><tr><th>когда</th><th>модель</th><th>кадров</th><th>эпох</th><th>лучшая</th><th>MAE руля</th><th>база</th><th>вес</th><th>время</th></tr>' +
+    runs.slice().reverse().map(r => `<tr class="${r.model === name ? 'cur' : ''}"><td>${r.time}</td><td><a href="?model=${r.model}">${r.model}</a></td><td>${r.train}+${r.val}</td><td>${r.epochs}</td><td>${r.best_epoch}</td><td>${r.val_mae_steer}</td><td>${r.baseline_steer}</td><td>${(r.bytes / 1e6).toFixed(2)} МБ</td><td>${r.duration_s} с</td></tr>`).join('') + '</table>' : 'пока пусто';
+  $('#evals').innerHTML = evals.length ? '<table><tr><th>когда</th><th>модель</th><th>где</th><th>конусов</th><th>пробег</th><th>ударов</th><th>прочее</th></tr>' +
+    evals.slice().reverse().slice(0, 30).map(e => `<tr><td>${e.time}</td><td>${e.model}</td><td>${e.kind === 'env' ? 'среда ×' + e.episodes : 'релей ' + e.seconds + ' с'}</td><td>${e.obstacles}</td><td>${e.progress_m} м</td><td>${e.collisions}</td><td>${e.infer_ms ? e.infer_ms + ' мс, RTT ' + e.rtt_ms : e.seconds + ' с'}</td></tr>`).join('') + '</table>' : 'пока пусто';
+}
+tick(); history(); setInterval(tick, 2000); setInterval(history, 5000); addEventListener('resize', () => { last = ''; tick(); });
+</script>

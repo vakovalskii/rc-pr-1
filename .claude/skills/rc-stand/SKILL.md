@@ -17,7 +17,12 @@ description: Поднять, проверить или остановить ст
 | статус, адреса для телефона | `python3 stand.py status` |
 | логи машинки / релея | `python3 stand.py logs car` / `logs relay` |
 | записать заезд | `python3 stand.py rec start <имя>` … `rec stop` → `datasets/<имя>/` |
-| автопилот фоном (машинка ездит сама) | `python3 stand.py pilot --seconds 3600` |
+| автопилот фоном (машинка ездит сама) | `python3 stand.py pilot --seconds 3600 --model models/bc_obst.pt` |
+| полигон с конусами | `python3 stand.py start --car polygon --data data/synth --obstacles 4` |
+| съёмка с телефона → карта одной командой | `python3 stand.py import дом.mov --name dom --path-length 12` |
+| быстрый датасет без релея (8 процессов) | `.venv/bin/python gen_data.py data/synth --out имя --workers 8 --laps 4 --noise 0.35` |
+| оценка политики в среде без сна | `.venv/bin/python env.py data/synth --eval models/bc.pt --episodes 4` |
+| панель обучения | `http://<ip>:8080/train.html` (кривые, сеть, чекпоинты, история) |
 | остановить всё | `python3 stand.py stop` |
 
 После `start`/`status` обязательно сообщить человеку адрес пульта

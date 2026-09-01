@@ -24,8 +24,8 @@ def main():
     p.add_argument("--z-max", type=float, default=0.5)
     p.add_argument("--min-pts", type=int, default=3, help="точек в клетке, чтобы считать её препятствием")
     p.add_argument("--reach", type=float, default=2.5, help="сколько метров вокруг траектории брать в карту")
-    p.add_argument("--cam-radius", type=float, default=0.5,
-                   help="коридор вокруг маршрута камеры, где можно ездить (препятствия всё равно блокируют)")
+    p.add_argument("--cam-radius", type=float, default=0.18, help="радиус, который камера точно проехала: свободно всегда")
+    p.add_argument("--roam", type=float, default=1.2, help="коридор вокруг маршрута, где можно ездить, если там ничего не видно (стены и мебель блокируют всё равно)")
     a = p.parse_args()
 
     root = pathlib.Path(a.dir); rec = root / "recon"; out = root / "map"; out.mkdir(exist_ok=True)
@@ -50,13 +50,16 @@ def main():
     grid = np.full((H, W), 128, np.uint8)                       # неизвестно
     grid[fl >= 1] = 255                                          # пол виден — свободно
     grid[obs >= a.min_pts] = 0                                   # препятствие
-    # где проехала камера — точно свободно, что бы ни говорил шум точек
+    # где проехала камера — точно свободно, что бы ни говорил шум точек;
+    # коридор пошире вокруг маршрута открываем только там, где ничего не видно
+    # (неизвестно), реконструированные препятствия он не стирает
     yy, xx = np.mgrid[0:H, 0:W]
-    r = a.cam_radius / a.res
+    r_hard, r_roam = a.cam_radius / a.res, a.roam / a.res
     for x, y in cams:
         cxi, cyi = (x - x0) / a.res, (y - y0) / a.res
-        m = (xx - cxi) ** 2 + (yy - cyi) ** 2 <= r * r
-        grid[m] = 255
+        d2 = (xx - cxi) ** 2 + (yy - cyi) ** 2
+        grid[d2 <= r_hard * r_hard] = 255
+        grid[(d2 <= r_roam * r_roam) & (grid == 128)] = 255
     # затянуть мелкие дыры в свободной зоне
     free = grid == 255
     neigh = ndimage.convolve(free.astype(np.int32), np.ones((3, 3), np.int32), mode="constant") - free
@@ -66,7 +69,8 @@ def main():
     img.save(out / "map.png")
 
     spawn = {"x": kf[0]["x"], "y": kf[0]["y"], "yaw": kf[0]["yaw"]}
-    meta = {"res": a.res, "origin": [float(x0), float(y0)], "width": W, "height": H,
+    cam_h = json.loads((rec / "report.json").read_text()).get("cam_height_m", 0.12) if (rec / "report.json").exists() else 0.12
+    meta = {"res": a.res, "origin": [float(x0), float(y0)], "width": W, "height": H, "cam_height": cam_h,
             "camera": poses["camera"], "frames_dir": "../frames", "spawn": spawn,
             "keyframes": [{"i": i, "name": f["name"], "x": f["x"], "y": f["y"], "yaw": f["yaw"]} for i, f in enumerate(kf)]}
     (out / "map.json").write_text(json.dumps(meta, indent=1))

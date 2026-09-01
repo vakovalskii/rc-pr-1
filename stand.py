@@ -70,11 +70,17 @@ def main():
     st.add_argument("--data", help="папка съёмки: data/<имя> (для video и polygon)")
     st.add_argument("--port", type=int, default=8080)
     st.add_argument("--fps", type=int, default=15)
+    st.add_argument("--obstacles", type=int, default=0, help="случайные конусы/коробки на маршруте (polygon)")
     st.add_argument("extra", nargs="*", help="доп. аргументы машинке, например --zoom 1.6")
     sub.add_parser("stop"); s2 = sub.add_parser("status"); s2.add_argument("--port", type=int, default=8080)
     lg = sub.add_parser("logs"); lg.add_argument("what", choices=["relay", "car"], nargs="?", default="car"); lg.add_argument("-n", type=int, default=30)
     rc = sub.add_parser("rec"); rc.add_argument("action", choices=["start", "stop"]); rc.add_argument("name", nargs="?"); rc.add_argument("--port", type=int, default=8080)
     sub.add_parser("ip")
+    im = sub.add_parser("import", help="видео с телефона -> кадры -> COLMAP -> карта, одной командой")
+    im.add_argument("video"); im.add_argument("--name", required=True, help="имя съёмки: data/<имя>")
+    im.add_argument("--fps", type=float, default=4.0); im.add_argument("--cam-height", type=float, default=0.12)
+    im.add_argument("--path-length", type=float, help="сколько метров прошёл с камерой (шагами) — надёжный масштаб")
+    im.add_argument("--loop", action="store_true", help="длинная съёмка: замыкание петли через vocab tree")
     pl = sub.add_parser("pilot", help="запустить автопилот фоном (stop гасит и его)")
     pl.add_argument("--seconds", type=float, default=3600); pl.add_argument("--model", default="models/bc.pt")
     pl.add_argument("--max-throttle", type=float, default=0.6); pl.add_argument("--port", type=int, default=8080)
@@ -95,7 +101,7 @@ def main():
         else: sys.exit("релей не поднялся, смотри: python3 stand.py logs relay")
         url = f"ws://127.0.0.1:{a.port}/ws/car"
         car = {"fake": [PY, "fake_car.py"], "video": [PY, "video_car.py", "--frames", f"{a.data}/frames"],
-               "polygon": [PY, "polygon_car.py", a.data], "none": None}[a.car]
+               "polygon": [PY, "polygon_car.py", a.data] + (["--obstacles", str(a.obstacles)] if a.obstacles else []), "none": None}[a.car]
         if car:
             spawn("car", [car[0], "-u"] + car[1:] + ["--url", url, "--fps", str(a.fps)] + a.extra); time.sleep(2.0)
         status(a.port)
@@ -111,6 +117,15 @@ def main():
         print(NOPROXY.open(f"http://127.0.0.1:{a.port}/rec/{a.action}{q}").read().decode())
     elif a.cmd == "ip":
         print(lan_ip())
+    elif a.cmd == "import":
+        d = f"data/{a.name}"
+        steps = [[PY, "prep_video.py", a.video, d, "--fps", str(a.fps)],
+                 [PY, "recon.py", d, "--cam-height", str(a.cam_height)] + (["--path-length", str(a.path_length)] if a.path_length else []) + (["--loop"] if a.loop else []),
+                 [PY, "map_build.py", d]]
+        for i, cmd in enumerate(steps, 1):
+            print(f"\n=== шаг {i}/3: {' '.join(cmd[1:3])} ===")
+            if subprocess.run(cmd, cwd=ROOT).returncode: sys.exit(f"шаг {i} упал — смотри вывод выше")
+        print(f"\nготово. полигон: python3 stand.py start --car polygon --data {d} --obstacles 4")
     elif a.cmd == "pilot":
         for name, pid in pids().items():
             if name == "pilot": os.killpg(os.getpgid(pid), signal.SIGTERM); (RUN / "pilot.pid").unlink(missing_ok=True)

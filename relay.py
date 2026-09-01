@@ -11,6 +11,7 @@ from aiohttp import web, WSMsgType
 
 WEB = pathlib.Path(__file__).parent / "web"
 DATASETS = pathlib.Path(__file__).parent / "datasets"
+MODELS = pathlib.Path(__file__).parent / "models"
 # что из телеметрии машинки кладём рядом с кадром в датасет
 TELE_KEYS = ("speed", "pos", "yaw", "x", "y", "kf", "collision", "collisions", "failsafe")
 
@@ -49,7 +50,7 @@ class Hub:
             "i": i, "t": round(time.time(), 3),
             "steer": self.last_cmd.get("steer", 0.0),
             "throttle": self.last_cmd.get("throttle", 0.0),
-            **({"steer_label": self.last_cmd["steer_label"]} if "steer_label" in self.last_cmd else {}),
+            **{k: self.last_cmd[k] for k in ("steer_label", "recover") if k in self.last_cmd},
             **{k: tele.get(k) for k in TELE_KEYS if k in tele},
         }, ensure_ascii=False) + "\n")
         self.rec["log"].flush()
@@ -133,6 +134,9 @@ async def index(request):
 async def map_page(request):
     return web.FileResponse(WEB / "map.html")
 
+async def train_page(request):
+    return web.FileResponse(WEB / "train.html")
+
 async def status(request):
     s = hub.stats
     dt = max(time.time() - s["since"], 1e-6)
@@ -159,6 +163,7 @@ def make_app(map_dir=None):
     routes = [
         web.get("/", index),
         web.get("/map.html", map_page),
+        web.get("/train.html", train_page),
         web.get("/status", status),
         web.get("/rec/start", rec_start),
         web.get("/rec/stop", rec_stop),
@@ -168,6 +173,8 @@ def make_app(map_dir=None):
     ]
     if map_dir:                                  # карта полигона для минимапы и /map.html
         routes.append(web.static("/map", pathlib.Path(map_dir)))
+    MODELS.mkdir(exist_ok=True)
+    routes.append(web.static("/models", MODELS))  # кривые обучения для /train.html
     app.add_routes(routes)
     return app
 

@@ -51,10 +51,22 @@ async def main(a):
 
         asyncio.create_task(rx())
         cid, t_rep = 0, time.monotonic()
+        stall_since, back_until, back_steer = None, 0.0, 0.0
         while time.monotonic() < t_end:
             cid += 1; pending[cid] = time.perf_counter()
             if len(pending) > 40: pending.clear()
-            await ws.send(json.dumps({"type": "cmd", "id": cid, "steer": round(state["steer"], 3), "throttle": round(state["throttle"], 3)}))
+            steer, throttle = state["steer"], state["throttle"]
+            now = time.monotonic(); last = state["last"] or {}
+            # рефлекс упора: газ есть, а скорости нет дольше секунды -> секунду назад с рулём в сторону
+            if throttle > 0.1 and abs(last.get("speed", 1)) < 0.05 and not last.get("failsafe", True):
+                stall_since = stall_since or now
+            else:
+                stall_since = None
+            if stall_since and now - stall_since > 1.0 and now > back_until:
+                back_until, back_steer, stall_since = now + 1.0, (1.0 if steer <= 0 else -1.0), None
+                state["backs"] = state.get("backs", 0) + 1
+            if now < back_until: steer, throttle = back_steer, -0.5
+            await ws.send(json.dumps({"type": "cmd", "id": cid, "steer": round(steer, 3), "throttle": round(throttle, 3)}))
             if time.monotonic() - t_rep > 2:
                 t_rep = time.monotonic(); n = max(state["frames"], 1)
                 print(f"  руль {state['steer']:+.2f} газ {state['throttle']:+.2f} | инференс {state['infer_ms'] / n:.1f} мс | "
@@ -65,7 +77,12 @@ async def main(a):
         print(NOPROXY.open(f"{http}/rec/stop").read().decode())
     n = max(state["frames"], 1)
     print(f"\nитог за {a.seconds} с: кадров {state['frames']} ({state['frames'] / a.seconds:.1f}/с), инференс {state['infer_ms'] / n:.1f} мс, "
-          f"пробег {state['odo']} м, ударов {state['collisions']}")
+          f"пробег {state['odo']} м, ударов {state['collisions']}, выездов назад {state.get('backs', 0)}")
+    from env import log_eval
+    obst = len((state["last"] or {}).get("obstacles", []))
+    log_eval({"kind": "realtime", "model": a.model, "obstacles": obst, "seconds": a.seconds,
+              "progress_m": state["odo"], "collisions": state["collisions"], "infer_ms": round(state["infer_ms"] / n, 1),
+              "rtt_ms": round(state["rtt"] or 0)})
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()

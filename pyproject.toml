@@ -1,0 +1,18 @@
+[project]
+name = "rc-pr-1"
+version = "0.1.0"
+description = "Телеуправляемая RC-багги с выносом вычислений по сети: стенд, полигон, обучение"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "aiohttp>=3.10",
+    "websockets>=13",
+    "numpy>=1.26",
+    "pillow>=10",
+    "opencv-python-headless>=4.10",
+    "scipy>=1.13",
+    "torch>=2.4",
+    "torchvision>=0.19",
+]
+
+[tool.uv]
+package = false

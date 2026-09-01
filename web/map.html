@@ -1,0 +1,98 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Карта полигона</title>
+<style>
+  :root{--bg:#0f1115;--fg:#e8e9ed;--dim:#8b93a1;--acc:#60a5fa;--ok:#4ade80;--bad:#f87171}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+  #wrap{display:flex;height:100%}
+  #map{flex:1;min-width:0;display:block;image-rendering:pixelated}
+  #side{width:260px;padding:14px;border-left:1px solid #2a3040;overflow:auto}
+  h1{font-size:14px;margin:0 0 10px;color:var(--acc)}
+  .row{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed #1f2530}
+  .row b{color:var(--fg)} .row span{color:var(--dim)}
+  #view{width:100%;margin-top:12px;border-radius:6px;background:#000}
+  .leg{margin-top:10px;color:var(--dim);font-size:12px} .leg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+</style>
+<div id="wrap">
+  <canvas id="map"></canvas>
+  <div id="side">
+    <h1>Карта полигона</h1>
+    <div class="row"><span>связь</span><b id="link">…</b></div>
+    <div class="row"><span>позиция</span><b id="pos">—</b></div>
+    <div class="row"><span>курс</span><b id="yaw">—</b></div>
+    <div class="row"><span>скорость</span><b id="spd">—</b></div>
+    <div class="row"><span>кадр-ключ</span><b id="kf">—</b></div>
+    <div class="row"><span>удары</span><b id="hits">—</b></div>
+    <div class="row"><span>пробег</span><b id="odo">—</b> м</div>
+    <img id="view" alt="">
+    <div class="leg">
+      <div><i style="background:#e1e4e8"></i>свободно &nbsp; <i style="background:#141418;border:1px solid #444"></i>препятствие &nbsp; <i style="background:#282c34;border:1px solid #444"></i>неизвестно</div>
+      <div><i style="background:#60a5fa"></i>кадры съёмки &nbsp; <i style="background:#4ade80"></i>машинка &nbsp; <i style="background:#f87171"></i>удар</div>
+    </div>
+  </div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const cv = $('#map'), g = cv.getContext('2d');
+let meta = null, img = null, tele = null, trail = [];
+
+fetch('/map/map.json').then(r => r.json()).then(m => {
+  meta = m; img = new Image(); img.src = '/map/map.png'; img.onload = draw;
+}).catch(() => { $('#pos').textContent = 'релей запущен без --map'; });
+
+function resize(){ cv.width = cv.clientWidth * devicePixelRatio; cv.height = cv.clientHeight * devicePixelRatio; draw(); }
+addEventListener('resize', resize); resize();
+
+function draw(){
+  if (!meta || !img || !img.complete) return;
+  const k = Math.min(cv.width / meta.width, cv.height / meta.height) * 0.96;
+  const ox = (cv.width - meta.width * k) / 2, oy = (cv.height - meta.height * k) / 2;
+  g.fillStyle = '#0f1115'; g.fillRect(0, 0, cv.width, cv.height);
+  g.imageSmoothingEnabled = false;
+  g.drawImage(img, ox, oy, meta.width * k, meta.height * k);
+  const P = (x, y) => [ox + (x - meta.origin[0]) / meta.res * k, oy + (meta.height - (y - meta.origin[1]) / meta.res) * k];
+  const r = Math.max(2, k * 0.5);
+  g.fillStyle = 'rgba(96,165,250,.85)';
+  for (const f of meta.keyframes) {
+    const [x, y] = P(f.x, f.y); g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+    g.strokeStyle = 'rgba(96,165,250,.5)'; g.beginPath(); g.moveTo(x, y);
+    g.lineTo(x + Math.cos(-f.yaw) * r * 3, y + Math.sin(-f.yaw) * r * 3); g.stroke();
+  }
+  if (trail.length) {
+    g.strokeStyle = 'rgba(74,222,128,.7)'; g.lineWidth = 2; g.beginPath();
+    trail.forEach(([x, y], i) => { const [a, b] = P(x, y); i ? g.lineTo(a, b) : g.moveTo(a, b); }); g.stroke();
+  }
+  if (tele) {
+    const [x, y] = P(tele.x, tele.y), R = r * 2.5;
+    g.fillStyle = tele.collision ? '#f87171' : '#4ade80'; g.beginPath();
+    g.moveTo(x + R * Math.cos(-tele.yaw), y + R * Math.sin(-tele.yaw));
+    g.lineTo(x + R * Math.cos(-tele.yaw + 2.5), y + R * Math.sin(-tele.yaw + 2.5));
+    g.lineTo(x + R * Math.cos(-tele.yaw - 2.5), y + R * Math.sin(-tele.yaw - 2.5));
+    g.closePath(); g.fill();
+  }
+}
+
+function connect(){
+  const ws = new WebSocket(`ws://${location.host}/ws/pult`);
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => { $('#link').textContent = 'ok'; $('#link').style.color = 'var(--ok)'; };
+  ws.onclose = () => { $('#link').textContent = 'нет'; $('#link').style.color = 'var(--bad)'; setTimeout(connect, 800); };
+  ws.onmessage = e => {
+    if (typeof e.data !== 'string') {
+      const url = URL.createObjectURL(new Blob([e.data], {type: 'image/jpeg'}));
+      const old = $('#view').src; $('#view').src = url; if (old.startsWith('blob:')) URL.revokeObjectURL(old);
+      return;
+    }
+    const m = JSON.parse(e.data);
+    if (m.type !== 'tele' || m.x === undefined) return;
+    tele = m; trail.push([m.x, m.y]); if (trail.length > 2000) trail.shift();
+    $('#pos').textContent = `${m.x.toFixed(2)}, ${m.y.toFixed(2)}`;
+    $('#yaw').textContent = `${Math.round(m.yaw * 180 / Math.PI)}°`;
+    $('#spd').textContent = `${m.speed} м/с`;
+    $('#kf').textContent = m.kf; $('#hits').textContent = m.collisions; $('#odo').textContent = m.odo;
+    draw();
+  };
+}
+connect();
+</script>

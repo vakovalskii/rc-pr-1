@@ -20,6 +20,12 @@
   .pad.live .knob{opacity:1}
   .lbl{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 10px);width:100%;
     text-align:center;color:var(--dim);pointer-events:none}
+  #mini{position:fixed;right:8px;bottom:calc(env(safe-area-inset-bottom) + 8px);width:150px;height:150px;
+    border:1px solid #2a3040;border-radius:8px;background:rgba(15,17,21,.85);display:none;pointer-events:none;z-index:2}
+  #reset{pointer-events:auto;cursor:pointer;user-select:none}
+  #reset:active{background:#2a3040}
+  .hit{animation:hit .4s}
+  @keyframes hit{0%{background:#7f1d1d}100%{background:rgba(15,17,21,.82)}}
 </style>
 
 <img id="view" alt="">
@@ -30,7 +36,10 @@
   <div class="chip">кадр <b id="kb">—</b> КБ</div>
   <div class="chip">поток <b id="bw">—</b> кбит/с</div>
   <div class="chip" id="fs"></div>
+  <div class="chip" id="pos" style="display:none">x <b id="px">0</b> y <b id="py">0</b> удары <b id="hits">0</b></div>
+  <div class="chip" id="reset" title="в точку старта">↺ старт</div>
 </div>
+<canvas id="mini" width="150" height="150"></canvas>
 <div id="pads">
   <div class="pad" id="padT"><div class="knob"></div><div class="lbl">ГАЗ — тяни вверх/вниз</div></div>
   <div class="pad" id="padS"><div class="knob"></div><div class="lbl">РУЛЬ — тяни влево/вправо</div></div>
@@ -62,6 +71,15 @@ function connect(){
         $('#fs').innerHTML = m.failsafe
           ? '<span class="bad">FAILSAFE</span>'
           : `<span class="ok">v ${m.speed}</span>`;
+        if (m.x !== undefined) {                       // машинка в полигоне — есть карта
+          $('#pos').style.display = '';
+          $('#px').textContent = m.x.toFixed(2); $('#py').textContent = m.y.toFixed(2);
+          $('#hits').textContent = m.collisions ?? 0;
+          if (m.collision && !$('#pos').classList.contains('hit')) {
+            $('#pos').classList.add('hit'); setTimeout(() => $('#pos').classList.remove('hit'), 400);
+          }
+          drawMini(m);
+        }
       }
     } else {
       frames++; bytes += e.data.byteLength;
@@ -117,4 +135,35 @@ function bindPad(el, axis, set){
 }
 bindPad($('#padT'), 'y', v => throttle = v);
 bindPad($('#padS'), 'x', v => steer = v);
+
+$('#reset').addEventListener('click', () => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({type:'reset'})); });
+
+// --- минимапа: карта из map_build.py, если релей её раздаёт --------------
+let mapMeta = null, mapImg = null, trail = [];
+fetch('/map/map.json').then(r => r.ok ? r.json() : null).then(m => {
+  if (!m) return;
+  mapMeta = m; mapImg = new Image(); mapImg.src = '/map/map.png';
+  mapImg.onload = () => { $('#mini').style.display = 'block'; };
+}).catch(() => {});
+function drawMini(t){
+  if (!mapMeta || !mapImg || !mapImg.complete) return;
+  const c = $('#mini'), g = c.getContext('2d');
+  const k = Math.min(c.width / mapMeta.width, c.height / mapMeta.height);
+  const ox = (c.width - mapMeta.width * k) / 2, oy = (c.height - mapMeta.height * k) / 2;
+  g.clearRect(0, 0, c.width, c.height);
+  g.imageSmoothingEnabled = false;
+  g.drawImage(mapImg, ox, oy, mapMeta.width * k, mapMeta.height * k);
+  const P = (x, y) => [ox + (x - mapMeta.origin[0]) / mapMeta.res * k,
+                       oy + (mapMeta.height - (y - mapMeta.origin[1]) / mapMeta.res) * k];
+  trail.push([t.x, t.y]); if (trail.length > 400) trail.shift();
+  g.strokeStyle = 'rgba(96,165,250,.8)'; g.lineWidth = 1; g.beginPath();
+  trail.forEach(([x, y], i) => { const [a, b] = P(x, y); i ? g.lineTo(a, b) : g.moveTo(a, b); });
+  g.stroke();
+  const [cx, cy] = P(t.x, t.y), r = 5;
+  g.fillStyle = t.collision ? '#f87171' : '#4ade80'; g.beginPath();
+  g.moveTo(cx + r * Math.cos(-t.yaw), cy + r * Math.sin(-t.yaw));
+  g.lineTo(cx + r * Math.cos(-t.yaw + 2.5), cy + r * Math.sin(-t.yaw + 2.5));
+  g.lineTo(cx + r * Math.cos(-t.yaw - 2.5), cy + r * Math.sin(-t.yaw - 2.5));
+  g.closePath(); g.fill();
+}
 </script>

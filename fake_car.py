@@ -37,7 +37,7 @@ class Car:
             self.failsafe = False
         target = self.throttle * 3.0                 # м/с
         self.speed += (target - self.speed) * min(dt * 3.0, 1.0)
-        self.heading += self.steer * self.speed * dt * 1.2
+        self.heading -= self.steer * self.speed * dt * 1.2      # руль +1 = вправо
         self.x += math.cos(self.heading) * self.speed * dt
         self.y += math.sin(self.heading) * self.speed * dt
 

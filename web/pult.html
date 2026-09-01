@@ -24,6 +24,7 @@
     border:1px solid #2a3040;border-radius:8px;background:rgba(15,17,21,.85);display:none;pointer-events:none;z-index:2}
   #reset{pointer-events:auto;cursor:pointer;user-select:none}
   #reset:active{background:#2a3040}
+  .kb{display:none;color:#5b6472} @media (hover:hover){.kb{display:inline}}
   .hit{animation:hit .4s}
   @keyframes hit{0%{background:#7f1d1d}100%{background:rgba(15,17,21,.82)}}
 </style>
@@ -41,8 +42,8 @@
 </div>
 <canvas id="mini" width="150" height="150"></canvas>
 <div id="pads">
-  <div class="pad" id="padT"><div class="knob"></div><div class="lbl">ГАЗ — тяни вверх/вниз</div></div>
-  <div class="pad" id="padS"><div class="knob"></div><div class="lbl">РУЛЬ — тяни влево/вправо</div></div>
+  <div class="pad" id="padT"><div class="knob"></div><div class="lbl">ГАЗ — тяни вверх/вниз<br><span class="kb">или ↑ ↓ / W S</span></div></div>
+  <div class="pad" id="padS"><div class="knob"></div><div class="lbl">РУЛЬ — тяни влево/вправо<br><span class="kb">или ← → / A D &nbsp; R — старт</span></div></div>
 </div>
 
 <script>
@@ -96,6 +97,7 @@ connect();
 // команды шлём с фиксированным темпом, а не по каждому касанию:
 // так поток предсказуем, и failsafe на борту получает ровный пульс
 setInterval(() => {
+  kbTick();
   if (!ws || ws.readyState !== 1) return;
   const id = ++cmdId;
   pending.set(id, performance.now());
@@ -136,7 +138,31 @@ function bindPad(el, axis, set){
 bindPad($('#padT'), 'y', v => throttle = v);
 bindPad($('#padS'), 'x', v => steer = v);
 
-$('#reset').addEventListener('click', () => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({type:'reset'})); });
+const sendReset = () => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({type:'reset'})); };
+$('#reset').addEventListener('click', sendReset);
+
+// --- клавиатура: стрелки / WASD, R — на старт ---------------------------
+// Клавиша — это ступенька, а машинке нужен плавный руль: цель из клавиш,
+// значения к ней подтягиваются в такте отправки команд
+const KEY = {ArrowUp:'up', KeyW:'up', ArrowDown:'down', KeyS:'down',
+             ArrowLeft:'left', KeyA:'left', ArrowRight:'right', KeyD:'right'};
+const held = new Set(); let kbLive = false;
+addEventListener('keydown', e => {
+  if (e.code === 'KeyR') { sendReset(); e.preventDefault(); return; }
+  if (KEY[e.code]) { held.add(KEY[e.code]); kbLive = true; e.preventDefault(); }
+});
+addEventListener('keyup', e => { if (KEY[e.code]) held.delete(KEY[e.code]); });
+addEventListener('blur', () => held.clear());
+function kbTick(){
+  if (!kbLive) return;
+  const tT = (held.has('up') ? 1 : 0) - (held.has('down') ? 1 : 0);
+  const tS = (held.has('right') ? 1 : 0) - (held.has('left') ? 1 : 0);
+  throttle += (tT * 0.7 - throttle) * 0.25;        // газ мягко, 70% максимума с клавиши
+  steer    += (tS - steer) * 0.35;                  // руль пошустрее
+  if (Math.abs(throttle) < 0.02) throttle = 0;
+  if (Math.abs(steer) < 0.02) steer = 0;
+  if (!held.size && !throttle && !steer) kbLive = false;
+}
 
 // --- минимапа: карта из map_build.py, если релей её раздаёт --------------
 let mapMeta = null, mapImg = null, trail = [];

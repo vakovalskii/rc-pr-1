@@ -18,6 +18,7 @@ class Hub:
     def __init__(self):
         self.car = None
         self.pults = set()
+        self.pilots = set()                                # пульты, объявившие себя автопилотом
         self.stats = {"frames": 0, "bytes": 0, "since": time.time()}
         self.last_cmd = {"steer": 0.0, "throttle": 0.0}   # с чем спаривать кадр
         self.rec = None                                    # {dir, log, n}
@@ -99,15 +100,31 @@ async def ws_pult(request):
     print(f"[pult] подключился, всего {len(hub.pults)}")
     try:
         async for msg in ws:
-            if msg.type == WSMsgType.TEXT:
-                try:
-                    hub.last_cmd = json.loads(msg.data)
-                except Exception:
-                    pass
-                if hub.car is not None:
-                    await hub.car.send_str(msg.data)    # команда на борт
+            if msg.type != WSMsgType.TEXT:
+                continue
+            try:
+                m = json.loads(msg.data)
+            except Exception:
+                continue
+            if m.get("type") == "hello":                  # {"type":"hello","role":"pilot"}
+                if m.get("role") == "pilot":
+                    hub.pilots.add(ws)
+                    await hub.to_pults(json.dumps({"type": "pilot", "online": True}))
+                continue
+            # Пока едет автопилот, пустые сердцебиения человеческого пульта (нули)
+            # не пропускаем — иначе они перебивают автопилот 20 раз в секунду.
+            # Ненулевая команда с пульта проходит: человек перехватил управление.
+            if (m.get("type") == "cmd" and ws not in hub.pilots and hub.pilots
+                    and not m.get("steer") and not m.get("throttle")):
+                continue
+            hub.last_cmd = m
+            if hub.car is not None:
+                await hub.car.send_str(msg.data)        # команда на борт
     finally:
         hub.pults.discard(ws)
+        if ws in hub.pilots:
+            hub.pilots.discard(ws)
+            await hub.to_pults(json.dumps({"type": "pilot", "online": bool(hub.pilots)}))
     return ws
 
 async def index(request):
@@ -122,6 +139,7 @@ async def status(request):
     return web.json_response({
         "car_online": hub.car is not None,
         "pults": len(hub.pults),
+        "pilot": bool(hub.pilots),
         "fps": round(s["frames"] / dt, 1),
         "kbit_s": round(s["bytes"] * 8 / dt / 1000, 1),
         "rec": hub.rec["name"] if hub.rec else None,

@@ -26,6 +26,7 @@ async def main(a):
         print(NOPROXY.open(f"{http}/rec/start?name={a.record}").read().decode())
     tele = {}
     async with websockets.connect(a.url, max_size=8 << 20, proxy=None) as ws:
+        await ws.send(json.dumps({"type": "hello", "role": "pilot"}))
         await ws.send(json.dumps({"type": "reset"}))
         async def rx():
             async for msg in ws:

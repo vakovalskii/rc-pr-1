@@ -38,6 +38,7 @@
   <div class="chip">поток <b id="bw">—</b> кбит/с</div>
   <div class="chip" id="fs"></div>
   <div class="chip" id="pos" style="display:none">x <b id="px">0</b> y <b id="py">0</b> удары <b id="hits">0</b></div>
+  <div class="chip" id="ap" style="display:none"><span class="ok">АВТОПИЛОТ</span> — стрелки перехватят</div>
   <div class="chip" id="reset" title="в точку старта">↺ старт</div>
 </div>
 <canvas id="mini" width="150" height="150"></canvas>
@@ -61,6 +62,7 @@ function connect(){
   ws.onmessage = e => {
     if (typeof e.data === 'string') {
       const m = JSON.parse(e.data);
+      if (m.type === 'pilot') { $('#ap').style.display = m.online ? '' : 'none'; return; }
       if (m.type === 'tele') {
         const t0 = pending.get(m.ack);
         if (t0 !== undefined) {                       // команда вернулась — вот петля

@@ -17,6 +17,7 @@ description: Поднять, проверить или остановить ст
 | статус, адреса для телефона | `python3 stand.py status` |
 | логи машинки / релея | `python3 stand.py logs car` / `logs relay` |
 | записать заезд | `python3 stand.py rec start <имя>` … `rec stop` → `datasets/<имя>/` |
+| автопилот фоном (машинка ездит сама) | `python3 stand.py pilot --seconds 3600` |
 | остановить всё | `python3 stand.py stop` |
 
 После `start`/`status` обязательно сообщить человеку адрес пульта
@@ -40,7 +41,8 @@ python3 stand.py start --car polygon --data data/dom
 .venv/bin/python train_bc.py datasets/<заезд> ...            # → models/bc.pt
 .venv/bin/python pilot.py --seconds 60 --reset               # едет сам, печатает пробег и удары
 ```
-Во время автопилота телефонный пульт закрыть — команды перемешаются.
+Пока едет автопилот, релей игнорирует нули с открытого пульта; стрелки или палец
+перехватывают управление, R / «↺ старт» возвращает на старт.
 
 ## Грабли
 - Порт 8080 занят → `python3 stand.py stop`, потом снова `start`.

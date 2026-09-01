@@ -52,7 +52,7 @@ def stop_all():
 
 def status(port):
     ps = pids()
-    for n in ("relay", "car"):
+    for n in ("relay", "car", "pilot"):
         print(f"{n:6s} {'работает, pid ' + str(ps[n]) if n in ps else 'не запущен'}")
     try:
         s = json.loads(NOPROXY.open(f"http://127.0.0.1:{port}/status", timeout=2).read())
@@ -75,6 +75,9 @@ def main():
     lg = sub.add_parser("logs"); lg.add_argument("what", choices=["relay", "car"], nargs="?", default="car"); lg.add_argument("-n", type=int, default=30)
     rc = sub.add_parser("rec"); rc.add_argument("action", choices=["start", "stop"]); rc.add_argument("name", nargs="?"); rc.add_argument("--port", type=int, default=8080)
     sub.add_parser("ip")
+    pl = sub.add_parser("pilot", help="запустить автопилот фоном (stop гасит и его)")
+    pl.add_argument("--seconds", type=float, default=3600); pl.add_argument("--model", default="models/bc.pt")
+    pl.add_argument("--max-throttle", type=float, default=0.6); pl.add_argument("--port", type=int, default=8080)
     a = p.parse_args()
 
     if a.cmd == "start":
@@ -108,6 +111,12 @@ def main():
         print(NOPROXY.open(f"http://127.0.0.1:{a.port}/rec/{a.action}{q}").read().decode())
     elif a.cmd == "ip":
         print(lan_ip())
+    elif a.cmd == "pilot":
+        for name, pid in pids().items():
+            if name == "pilot": os.killpg(os.getpgid(pid), signal.SIGTERM); (RUN / "pilot.pid").unlink(missing_ok=True)
+        spawn("pilot", [PY, "-u", "pilot.py", "--model", a.model, "--seconds", str(a.seconds), "--reset",
+                        "--max-throttle", str(a.max_throttle), "--url", f"ws://127.0.0.1:{a.port}/ws/pult"])
+        time.sleep(3); print((RUN / "pilot.log").read_text().splitlines()[-1]); status(a.port)
 
 if __name__ == "__main__":
     main()

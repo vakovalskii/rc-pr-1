@@ -26,6 +26,7 @@ async def main(a):
     pending = {}
     async with websockets.connect(a.url, max_size=8 << 20, proxy=None) as ws:
         print(f"подключились к {a.url}, модель {a.model}, устройство {dev}")
+        await ws.send(json.dumps({"type": "hello", "role": "pilot"}))   # релей перестанет слушать пустой пульт
         if a.reset: await ws.send(json.dumps({"type": "reset"}))
         t_end = time.monotonic() + a.seconds
 

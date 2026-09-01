@@ -1,0 +1,120 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>RC Buggy</title>
+<style>
+  :root{--bg:#0f1115;--fg:#e8e9ed;--dim:#8b93a1;--ok:#4ade80;--bad:#f87171;--acc:#60a5fa}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
+    font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;touch-action:none;overscroll-behavior:none}
+  #view{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+  #hud{position:fixed;top:calc(env(safe-area-inset-top) + 8px);left:8px;right:8px;
+    display:flex;gap:6px;flex-wrap:wrap;pointer-events:none}
+  .chip{background:rgba(15,17,21,.82);border:1px solid #2a3040;border-radius:6px;padding:4px 8px;white-space:nowrap}
+  .chip b{color:var(--acc);font-weight:600}
+  .bad{color:var(--bad)} .ok{color:var(--ok)}
+  #pads{position:fixed;inset:0;display:flex}
+  .pad{flex:1;position:relative}
+  .knob{position:absolute;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:50%;
+    border:2px solid var(--acc);background:rgba(96,165,250,.16);opacity:0;transition:opacity .12s}
+  .pad.live .knob{opacity:1}
+  .lbl{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 10px);width:100%;
+    text-align:center;color:var(--dim);pointer-events:none}
+</style>
+
+<img id="view" alt="">
+<div id="hud">
+  <div class="chip">link <b id="link">…</b></div>
+  <div class="chip">RTT <b id="rtt">—</b> мс</div>
+  <div class="chip">fps <b id="fps">—</b></div>
+  <div class="chip">кадр <b id="kb">—</b> КБ</div>
+  <div class="chip">поток <b id="bw">—</b> кбит/с</div>
+  <div class="chip" id="fs"></div>
+</div>
+<div id="pads">
+  <div class="pad" id="padT"><div class="knob"></div><div class="lbl">ГАЗ — тяни вверх/вниз</div></div>
+  <div class="pad" id="padS"><div class="knob"></div><div class="lbl">РУЛЬ — тяни влево/вправо</div></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let ws, steer = 0, throttle = 0, cmdId = 0;
+const pending = new Map();               // id -> t0, для замера RTT петли
+let rttEMA = null, frames = 0, bytes = 0, lastTick = performance.now();
+
+function connect(){
+  ws = new WebSocket(`ws://${location.host}/ws/pult`);
+  ws.binaryType = 'arraybuffer';
+  ws.onopen  = () => { $('#link').textContent = 'ok'; $('#link').className = 'ok'; };
+  ws.onclose = () => { $('#link').textContent = 'нет'; $('#link').className = 'bad';
+                       setTimeout(connect, 800); };
+  ws.onmessage = e => {
+    if (typeof e.data === 'string') {
+      const m = JSON.parse(e.data);
+      if (m.type === 'tele') {
+        const t0 = pending.get(m.ack);
+        if (t0 !== undefined) {                       // команда вернулась — вот петля
+          const rtt = performance.now() - t0;
+          rttEMA = rttEMA === null ? rtt : rttEMA * 0.8 + rtt * 0.2;
+          $('#rtt').textContent = Math.round(rttEMA);
+          pending.clear();
+        }
+        $('#fs').innerHTML = m.failsafe
+          ? '<span class="bad">FAILSAFE</span>'
+          : `<span class="ok">v ${m.speed}</span>`;
+      }
+    } else {
+      frames++; bytes += e.data.byteLength;
+      $('#kb').textContent = (e.data.byteLength / 1024).toFixed(1);
+      const url = URL.createObjectURL(new Blob([e.data], {type:'image/jpeg'}));
+      const old = $('#view').src;
+      $('#view').src = url;
+      if (old.startsWith('blob:')) URL.revokeObjectURL(old);
+    }
+  };
+}
+connect();
+
+// команды шлём с фиксированным темпом, а не по каждому касанию:
+// так поток предсказуем, и failsafe на борту получает ровный пульс
+setInterval(() => {
+  if (!ws || ws.readyState !== 1) return;
+  const id = ++cmdId;
+  pending.set(id, performance.now());
+  if (pending.size > 40) pending.clear();
+  ws.send(JSON.stringify({type:'cmd', id, steer:+steer.toFixed(3), throttle:+throttle.toFixed(3)}));
+}, 50);                                   // 20 Гц
+
+setInterval(() => {
+  const dt = (performance.now() - lastTick) / 1000;
+  $('#fps').textContent = (frames / dt).toFixed(1);
+  $('#bw').textContent  = Math.round(bytes * 8 / dt / 1000);
+  frames = 0; bytes = 0; lastTick = performance.now();
+}, 1000);
+
+// --- управление пальцем -------------------------------------------------
+function bindPad(el, axis, set){
+  const knob = el.querySelector('.knob');
+  let id = null, ox = 0, oy = 0;
+  const R = 90;                                   // ход в пикселях до упора
+  el.addEventListener('pointerdown', e => {
+    id = e.pointerId; ox = e.clientX; oy = e.clientY;
+    el.setPointerCapture(id); el.classList.add('live');
+    const r = el.getBoundingClientRect();
+    knob.style.left = (ox - r.left) + 'px'; knob.style.top = (oy - r.top) + 'px';
+  });
+  el.addEventListener('pointermove', e => {
+    if (e.pointerId !== id) return;
+    const d = axis === 'y' ? -(e.clientY - oy) : (e.clientX - ox);
+    set(Math.max(-1, Math.min(1, d / R)));
+  });
+  const up = e => {
+    if (e.pointerId !== id) return;
+    id = null; el.classList.remove('live'); set(0);   // отпустил — в ноль
+  };
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointercancel', up);
+}
+bindPad($('#padT'), 'y', v => throttle = v);
+bindPad($('#padS'), 'x', v => steer = v);
+</script>

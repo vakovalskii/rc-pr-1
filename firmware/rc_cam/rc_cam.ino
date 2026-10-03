@@ -9,13 +9,16 @@
 //   GPIO15 -> IN2 драйвера
 //   GPIO4  -> вспышка-светодиод (фара)
 //
+// Видео: пульт тянет /jpg по одному кадру (задержка = передача одного кадра);
+// /stream — обычный MJPEG-поток для Pi и сторонних плееров.
+//
 // Руль: у ESP32-CAM все свободные пины с АЦП сидят на ADC2, а ADC2 занят Wi-Fi,
 // поэтому потенциометр 5-проводной сервы здесь не прочитать. Руль работает
 // без обратной связи: стик = ШИМ моторчика. Чтобы не жечь моторчик в упоре,
 // полный ток идёт только STEER_PUSH_MS, дальше — удержание STEER_HOLD.
 //
-// Протокол: c,<id>,<руль -1000..1000>,<газ -1000..1000>   max,<0..1000>  acc,<мс>  brk,<мс>  inv  light,<0|1>
-// Ответ:    t,<ack>,<esc_us>,<мотор>,<failsafe>,<inv>,<max>,<источник>,<acc>,<brk>,<fps>,<клиентов>
+// Протокол: c,<id>,<руль -1000..1000>,<газ -1000..1000>   max,<0..1000>  acc,<мс>  brk,<мс>  inv  light,<0|1>  res,<0|1|2>  q,<8..40>
+// Ответ:    t,<ack>,<esc_us>,<мотор>,<failsafe>,<inv>,<max>,<источник>,<acc>,<brk>,<fps>,<клиентов>,<res>,<q>
 
 #include <WiFi.h>
 #include <DNSServer.h>
@@ -57,7 +60,8 @@ const int CH_ESC = 0, CH_IN1 = 2, CH_IN2 = 3;     // камера сидит н�
 #define PCLK_GPIO_NUM 22
 
 Preferences prefs;
-struct { int maxThr = 300, accMs = 600, brkMs = 1500; bool inv = false; } cfg;
+struct { int maxThr = 300, accMs = 600, brkMs = 1500; bool inv = false; int res = 1, q = 12; } cfg;
+const framesize_t RES[] = {FRAMESIZE_QVGA, FRAMESIZE_HVGA, FRAMESIZE_VGA};   // 320x240, 480x320, 640x480
 
 DNSServer dns;
 WebSocketsServer ws(82);
@@ -76,6 +80,7 @@ void cfgLoad() {
   prefs.begin("rc", false);
   cfg.maxThr = prefs.getInt("max", 300); cfg.accMs = prefs.getInt("acc", 600);
   cfg.brkMs = prefs.getInt("brk", 1500); cfg.inv = prefs.getBool("inv", false);
+  cfg.res = prefs.getInt("res", 1); cfg.q = prefs.getInt("q", 12);
 }
 
 void escWrite(int us) { ledcWrite(CH_ESC, (uint32_t)us * ((1 << ESC_RES) - 1) / 20000); }
@@ -115,6 +120,11 @@ void control() {
   setMotor(out);
 }
 
+void applyCam() {
+  sensor_t* sn = esp_camera_sensor_get();
+  if (sn) { sn->set_framesize(sn, RES[cfg.res]); sn->set_quality(sn, cfg.q); }
+}
+
 void handle(const char* s, const char* from) {
   if (s[0] == 'c' && s[1] == ',') {
     long id, st, th;
@@ -127,12 +137,14 @@ void handle(const char* s, const char* from) {
   else if (!strncmp(s, "brk,", 4)) { cfg.brkMs = constrain(atoi(s + 4), 50, 5000); prefs.putInt("brk", cfg.brkMs); }
   else if (!strcmp(s, "inv")) { cfg.inv = !cfg.inv; prefs.putBool("inv", cfg.inv); }
   else if (!strncmp(s, "light,", 6)) { digitalWrite(PIN_FLASH, atoi(s + 6) ? HIGH : LOW); }
+  else if (!strncmp(s, "res,", 4)) { cfg.res = constrain(atoi(s + 4), 0, 2); prefs.putInt("res", cfg.res); applyCam(); }
+  else if (!strncmp(s, "q,", 2)) { cfg.q = constrain(atoi(s + 2), 8, 40); prefs.putInt("q", cfg.q); applyCam(); }
 }
 
 String tele() {
   char b[128];
-  snprintf(b, sizeof b, "t,%ld,%d,%d,%d,%d,%d,%s,%d,%d,%.1f,%d", (long)lastId, escUs, motorOut, failsafe,
-           cfg.inv, cfg.maxThr, src, cfg.accMs, cfg.brkMs, fps, (int)streamClients);
+  snprintf(b, sizeof b, "t,%ld,%d,%d,%d,%d,%d,%s,%d,%d,%.1f,%d,%d,%d", (long)lastId, escUs, motorOut, failsafe,
+           cfg.inv, cfg.maxThr, src, cfg.accMs, cfg.brkMs, fps, (int)streamClients, cfg.res, cfg.q);
   return String(b);
 }
 
@@ -149,6 +161,20 @@ esp_err_t redirect404(httpd_req_t* req, httpd_err_code_t) {   // captive portal:
   httpd_resp_set_status(req, "302 Found");
   httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
   return httpd_resp_send(req, nullptr, 0);
+}
+
+// Один свежий кадр на запрос. Страница просит следующий, только когда показала
+// предыдущий — очередь из кадров не копится ни в сокете, ни в браузере.
+esp_err_t jpgHandler(httpd_req_t* req) {
+  camera_fb_t* fb = esp_camera_fb_get();
+  if (!fb) { httpd_resp_send_500(req); return ESP_FAIL; }
+  httpd_resp_set_type(req, "image/jpeg");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  esp_err_t r = httpd_resp_send(req, (const char*)fb->buf, fb->len);
+  esp_camera_fb_return(fb);
+  frames++;
+  return r;
 }
 
 #define BOUNDARY "rcframe"
@@ -182,8 +208,10 @@ void startHttp() {
   httpd_config_t s = HTTPD_DEFAULT_CONFIG();
   s.server_port = 81; s.ctrl_port = 32769; s.max_open_sockets = 3;
   if (httpd_start(&httpStream, &s) == ESP_OK) {
-    httpd_uri_t st = {"/stream", HTTP_GET, streamHandler, nullptr};
+    httpd_uri_t st = {"/stream", HTTP_GET, streamHandler, nullptr};      // поток для Pi и сторонних плееров
     httpd_register_uri_handler(httpStream, &st);
+    httpd_uri_t jpg = {"/jpg", HTTP_GET, jpgHandler, nullptr};            // кадр по запросу — для пульта
+    httpd_register_uri_handler(httpStream, &jpg);
   }
 }
 
@@ -199,6 +227,7 @@ bool startCamera() {
   if (psramFound()) { c.frame_size = FRAMESIZE_VGA; c.jpeg_quality = 12; c.fb_count = 2; c.fb_location = CAMERA_FB_IN_PSRAM; }
   else              { c.frame_size = FRAMESIZE_QVGA; c.jpeg_quality = 14; c.fb_count = 1; c.fb_location = CAMERA_FB_IN_DRAM; }
   esp_err_t e = esp_camera_init(&c);
+  if (e == ESP_OK) applyCam();       // буферы под VGA, а реальный размер — из настроек
   Serial.printf("камера: %s, PSRAM %s, %s\n", e == ESP_OK ? "ok" : "ОШИБКА", psramFound() ? "есть" : "нет",
                 psramFound() ? "VGA 640x480" : "QVGA 320x240");
   return e == ESP_OK;

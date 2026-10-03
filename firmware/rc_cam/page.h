@@ -43,7 +43,7 @@ button.b:active{background:#2a3040}
  <span id="dot"></span><span id="state">связь…</span>
  <span class="s">RTT <b id="rtt">—</b></span>
  <span class="s">ESC <b id="esc">—</b></span>
- <span class="s">видео <b id="fps">—</b> к/с</span>
+ <span class="s">видео <b id="fps">—</b> к/с · <b id="vms">—</b> мс</span>
  <button id="light" class="b" style="padding:4px 9px">фара</button>
  <button id="gear" aria-label="настройки">⚙</button>
 </div>
@@ -56,6 +56,8 @@ button.b:active{background:#2a3040}
  <div class="row"><label>газ максимум</label><input id="max" type="range" min="0" max="1000" step="50"><b id="maxv"></b></div>
  <div class="row"><label>разгон</label><input id="acc" type="range" min="100" max="3000" step="100"><b id="accv"></b></div>
  <div class="row"><label>торможение</label><input id="brk" type="range" min="100" max="4000" step="100"><b id="brkv"></b></div>
+ <div class="row"><label>видео</label><select id="res"><option value="0">320×240 быстро</option><option value="1">480×320</option><option value="2">640×480 чётко</option></select></div>
+ <div class="row"><label>качество</label><input id="q" type="range" min="8" max="40" step="2"><b id="qv"></b></div>
  <div class="row"><label>руль</label><button class="b" data-c="inv">инвертировать моторчик</button></div>
  <div class="note">руль без датчика положения: держишь стик — колёса повёрнуты</div>
  <div class="row" style="margin:12px 0 0"><button class="b" id="close" style="flex:1">готово</button></div>
@@ -69,22 +71,42 @@ function connect(){
  ws.onclose=()=>{$('#dot').style.background='var(--bad)';$('#state').textContent='нет связи';setTimeout(connect,700)};
  ws.onmessage=e=>{
   const p=e.data.split(',');if(p[0]!=='t')return;
-  const [_,ack,esc,mot,fs,inv,max,src,acc,brk,fps,cl]=p;
+  const [_,ack,esc,mot,fs,inv,max,src,acc,brk,efps,cl,res,q]=p;
   const t0=sent.get(+ack);if(t0!==undefined){const r=performance.now()-t0;rtt=rtt===null?r:rtt*.8+r*.2;$('#rtt').textContent=Math.round(rtt)+' мс';sent.clear()}
   const st=$('#state');
   if(fs==='1'){st.textContent='FAILSAFE';st.style.color='var(--bad)'}else{st.textContent='едем';st.style.color='var(--ok)'}
-  $('#esc').textContent=esc;$('#fps').textContent=fps;
-  if(!maxSet){$('#max').value=max;$('#maxv').textContent=Math.round(max/10)+'%';$('#acc').value=acc;$('#accv').textContent=(acc/1000).toFixed(1)+' с';$('#brk').value=brk;$('#brkv').textContent=(brk/1000).toFixed(1)+' с';maxSet=true}
+  $('#esc').textContent=esc;
+  if(!maxSet){$('#max').value=max;$('#maxv').textContent=Math.round(max/10)+'%';$('#acc').value=acc;$('#accv').textContent=(acc/1000).toFixed(1)+' с';$('#brk').value=brk;$('#brkv').textContent=(brk/1000).toFixed(1)+' с';if(document.activeElement!==$('#res'))$('#res').value=res;$('#q').value=q;$('#qv').textContent=(+q<=12?'выше':+q>=24?'ниже':'среднее');maxSet=true}
  };
 }
 connect();
-const cam=$('#cam');const reload=()=>{cam.src='http://'+location.hostname+':81/stream?'+Date.now()};cam.onerror=()=>setTimeout(reload,1000);reload();
+const cam=$('#cam');let vms=null,vn=0,vt=performance.now();
+async function video(){
+ for(;;){
+  if(document.hidden){await new Promise(r=>setTimeout(r,300));continue}
+  const t0=performance.now();
+  try{
+   const r=await fetch('http://'+location.hostname+':81/jpg?'+t0,{cache:'no-store'});
+   const u=URL.createObjectURL(await r.blob()),old=cam.src;cam.src=u;
+   try{await cam.decode()}catch(e){}
+   if(old.startsWith('blob:'))URL.revokeObjectURL(old);
+   const dt=performance.now()-t0;vms=vms===null?dt:vms*.8+dt*.2;vn++;
+  }catch(e){await new Promise(r=>setTimeout(r,500))}
+ }
+}
+video();
+setInterval(()=>{const now=performance.now();$('#fps').textContent=(vn*1000/(now-vt)).toFixed(0);vn=0;vt=now;if(vms!==null)$('#vms').textContent=Math.round(vms)},1000);
 let lightOn=0;$('#light').onclick=()=>{lightOn^=1;send('light,'+lightOn);$('#light').style.background=lightOn?'#fbbf24':''};
-setInterval(()=>{if(!ws||ws.readyState!==1)return;const i=++id;sent.set(i,performance.now());if(sent.size>40)sent.clear();
- ws.send('c,'+i+','+Math.round(steer*1000)+','+Math.round(thr*1000))},50);
+let lastSend=0;
+function sendCmd(){if(!ws||ws.readyState!==1)return;const i=++id;lastSend=performance.now();sent.set(i,lastSend);if(sent.size>40)sent.clear();
+ ws.send('c,'+i+','+Math.round(steer*1000)+','+Math.round(thr*1000))}
+const kick=()=>{if(performance.now()-lastSend>=20)sendCmd()};   // движение пальца уходит сразу, не ждёт тика
+setInterval(sendCmd,50);                                       // пульс для failsafe
 const send=s=>ws&&ws.readyState===1&&ws.send(s);
 document.querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>send(b.dataset.c));
 $('#max').oninput=e=>{$('#maxv').textContent=Math.round(e.target.value/10)+'%';send('max,'+e.target.value)};
+$('#res').onchange=e=>send('res,'+e.target.value);
+$('#q').onchange=e=>send('q,'+e.target.value);
 $('#acc').oninput=e=>{$('#accv').textContent=(e.target.value/1000).toFixed(1)+' с';send('acc,'+e.target.value)};
 $('#brk').oninput=e=>{$('#brkv').textContent=(e.target.value/1000).toFixed(1)+' с';send('brk,'+e.target.value)};
 $('#gear').onclick=()=>$('#set').classList.toggle('open');$('#close').onclick=()=>$('#set').classList.remove('open');
@@ -100,7 +122,7 @@ function stick(zone,axis,set,out){
  zone.addEventListener('pointerup',up);zone.addEventListener('pointercancel',up);
  return show;
 }
-const showT=stick($('#zT'),'y',v=>thr=v,$('#vT')),showS=stick($('#zS'),'x',v=>steer=v,$('#vS'));
+const showT=stick($('#zT'),'y',v=>{thr=v;kick()},$('#vT')),showS=stick($('#zS'),'x',v=>{steer=v;kick()},$('#vS'));
 document.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
 document.addEventListener('gesturestart',e=>e.preventDefault());
 const K={ArrowUp:'u',KeyW:'u',ArrowDown:'d',KeyS:'d',ArrowLeft:'l',KeyA:'l',ArrowRight:'r',KeyD:'r'},held=new Set();

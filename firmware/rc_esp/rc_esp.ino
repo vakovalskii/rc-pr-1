@@ -1,6 +1,7 @@
 // RC-багги: реалтайм-контроллер на ESP8266 (NodeMCU).
 //
-// Своя Wi-Fi точка RC-BUGGY (пароль buggy1234), пульт на http://192.168.4.1.
+// Своя Wi-Fi точка RC-BUGGY (пароль 12345678), пульт на http://192.168.4.1 —
+// и сам выскакивает при подключении (captive portal: DNS отвечает ESP на любой адрес).
 // Те же команды принимаются по USB (115200) — так ими будет управлять Pi.
 // FAILSAFE живёт здесь: 300 мс без команд -> газ в нейтраль, руль в центр.
 //
@@ -19,13 +20,14 @@
 
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include <DNSServer.h>
 #include <WebSocketsServer.h>
 #include <Servo.h>
 #include <EEPROM.h>
 #include "page.h"
 
 const char* AP_SSID = "RC-BUGGY";
-const char* AP_PASS = "buggy1234";
+const char* AP_PASS = "12345678";
 
 const int PIN_ESC = 5, PIN_IN1 = 14, PIN_IN2 = 12, PIN_LED = 2;
 const uint32_t FAILSAFE_MS = 300;
@@ -40,6 +42,7 @@ void cfgSave() { EEPROM.put(0, cfg); EEPROM.commit(); }
 bool calibrated() { return cfg.potL >= 0 && cfg.potC >= 0 && cfg.potR >= 0 && abs(cfg.potR - cfg.potL) > 60; }
 
 ESP8266WebServer http(80);
+DNSServer dns;                                   // любой адрес -> ESP: телефон сам открывает пульт
 WebSocketsServer ws(81);
 Servo esc;
 
@@ -134,7 +137,8 @@ void setup() {
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
   WiFi.softAP(AP_SSID, AP_PASS, 6, false, 4);
   http.on("/", [] { http.send_P(200, "text/html; charset=utf-8", PAGE); });
-  http.onNotFound([] { http.sendHeader("Location", "/"); http.send(302); });
+  http.onNotFound([] { http.sendHeader("Location", "http://192.168.4.1/"); http.send(302); });   // проверки captive portal тоже сюда
+  dns.start(53, "*", WiFi.softAPIP());
   http.begin();
   ws.begin(); ws.onEvent(onWs);
   Serial.printf("\nrc_esp готов: точка %s, http://%s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
@@ -144,6 +148,7 @@ char line[64]; size_t lineLen = 0;
 uint32_t lastCtl = 0, lastTele = 0;
 
 void loop() {
+  dns.processNextRequest();
   http.handleClient();
   ws.loop();
   while (Serial.available()) {

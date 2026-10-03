@@ -1,7 +1,7 @@
 // RC-багги: всё на одной ESP32-CAM (AI-Thinker) — видео, ход, руль.
 //
 // Своя Wi-Fi точка RC-BUGGY (пароль 12345678), пульт на http://192.168.4.1 и
-// выскакивает сам (captive portal). Видео MJPEG на :81/stream — фоном пульта.
+// выскакивает сам (captive portal). Видео — фоном пульта.
 // Управление по WebSocket :82 и тем же текстом по USB (115200) — для Pi.
 //
 //   GPIO13 -> сигнал регулятора хода (ESC), 50 Гц
@@ -9,8 +9,8 @@
 //   GPIO15 -> IN2 драйвера
 //   GPIO4  -> вспышка-светодиод (фара)
 //
-// Видео: пульт тянет /jpg по одному кадру (задержка = передача одного кадра);
-// /stream — обычный MJPEG-поток для Pi и сторонних плееров.
+// Видео: пульт тянет :81/jpg по одному кадру (задержка = передача одного кадра);
+// :83/stream — обычный MJPEG-поток для Pi и сторонних плееров (отдельный сервер).
 //
 // Руль: у ESP32-CAM все свободные пины с АЦП сидят на ADC2, а ADC2 занят Wi-Fi,
 // поэтому потенциометр 5-проводной сервы здесь не прочитать. Руль работает
@@ -66,7 +66,8 @@ const framesize_t RES[] = {FRAMESIZE_QVGA, FRAMESIZE_HVGA, FRAMESIZE_VGA};   // 
 
 DNSServer dns;
 WebSocketsServer ws(82);
-httpd_handle_t httpPage = nullptr, httpStream = nullptr;
+httpd_handle_t httpPage = nullptr, httpJpg = nullptr, httpStream = nullptr;
+volatile uint32_t fbFails = 0, jpgServed = 0;
 
 volatile int16_t cmdSteer = 0, cmdThr = 0;
 volatile int32_t lastId = -1;
@@ -176,13 +177,13 @@ esp_err_t redirect404(httpd_req_t* req, httpd_err_code_t) {   // captive portal:
 // предыдущий — очередь из кадров не копится ни в сокете, ни в браузере.
 esp_err_t jpgHandler(httpd_req_t* req) {
   camera_fb_t* fb = esp_camera_fb_get();
-  if (!fb) { httpd_resp_send_500(req); return ESP_FAIL; }
+  if (!fb) { fbFails++; httpd_resp_send_500(req); return ESP_FAIL; }
   httpd_resp_set_type(req, "image/jpeg");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
   esp_err_t r = httpd_resp_send(req, (const char*)fb->buf, fb->len);
   esp_camera_fb_return(fb);
-  frames++;
+  frames++; jpgServed++;
   return r;
 }
 
@@ -195,7 +196,7 @@ esp_err_t streamHandler(httpd_req_t* req) {
   char head[96]; esp_err_t res = ESP_OK;
   while (res == ESP_OK) {
     camera_fb_t* fb = esp_camera_fb_get();
-    if (!fb) { delay(5); continue; }
+    if (!fb) { fbFails++; delay(5); continue; }
     int n = snprintf(head, sizeof head, "\r\n--" BOUNDARY "\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n", fb->len);
     res = httpd_resp_send_chunk(req, head, n);
     if (res == ESP_OK) res = httpd_resp_send_chunk(req, (const char*)fb->buf, fb->len);
@@ -214,15 +215,21 @@ void startHttp() {
     httpd_register_uri_handler(httpPage, &root);
     httpd_register_err_handler(httpPage, HTTPD_404_NOT_FOUND, redirect404);
   }
-  httpd_config_t s = HTTPD_DEFAULT_CONFIG();
-  // iPhone открывает новое соединение почти на каждый кадр и не спешит закрывать старые:
-  // без вытеснения старых сокетов сервер упирается в лимит и видео встаёт
-  s.server_port = 81; s.ctrl_port = 32769; s.max_open_sockets = 7; s.lru_purge_enable = true;
-  if (httpd_start(&httpStream, &s) == ESP_OK) {
-    httpd_uri_t st = {"/stream", HTTP_GET, streamHandler, nullptr};      // поток для Pi и сторонних плееров
-    httpd_register_uri_handler(httpStream, &st);
-    httpd_uri_t jpg = {"/jpg", HTTP_GET, jpgHandler, nullptr};            // кадр по запросу — для пульта
-    httpd_register_uri_handler(httpStream, &jpg);
+  // У esp_http_server один рабочий поток на сервер: пока /stream отдаёт поток, весь сервер
+  // занят. Поэтому кадры по запросу (/jpg, :81) и поток (/stream, :83) — разные серверы.
+  httpd_config_t j = HTTPD_DEFAULT_CONFIG();
+  j.server_port = 81; j.ctrl_port = 32769; j.max_open_sockets = 7; j.lru_purge_enable = true;
+  j.recv_wait_timeout = 2; j.send_wait_timeout = 2;       // мёртвые соединения рвём быстро
+  if (httpd_start(&httpJpg, &j) == ESP_OK) {
+    httpd_uri_t jpg = {"/jpg", HTTP_GET, jpgHandler, nullptr};
+    httpd_register_uri_handler(httpJpg, &jpg);
+  }
+  httpd_config_t st = HTTPD_DEFAULT_CONFIG();
+  st.server_port = 83; st.ctrl_port = 32770; st.max_open_sockets = 3; st.lru_purge_enable = true;
+  st.send_wait_timeout = 2;
+  if (httpd_start(&httpStream, &st) == ESP_OK) {
+    httpd_uri_t sh = {"/stream", HTTP_GET, streamHandler, nullptr};       // MJPEG для Pi и сторонних плееров
+    httpd_register_uri_handler(httpStream, &sh);
   }
 }
 
@@ -247,6 +254,7 @@ bool startCamera() {
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);      // просадка от Wi-Fi при старте не должна ребутить плату
   Serial.begin(115200);
+  Serial.printf("\nпричина старта: %d\n", (int)esp_reset_reason());   // 1 питание, 4 паника, 9 просадка (brownout)
   pinMode(PIN_FLASH, OUTPUT); digitalWrite(PIN_FLASH, LOW);
   ledcSetup(CH_ESC, 50, ESC_RES); ledcAttachPin(PIN_ESC, CH_ESC); escWrite(1500);   // нейтраль сразу: регулятор взводится
   ledcSetup(CH_IN1, 10000, 10); ledcAttachPin(PIN_IN1, CH_IN1);
@@ -275,6 +283,12 @@ void loop() {
   }
   uint32_t now = millis();
   if (now - lastCtl >= 10) { lastCtl = now; control(); }
+  static uint32_t lastDiag = 0;
+  if (now - lastDiag >= 5000) {                    // диагностика в USB: видно, что с платой, когда видео встаёт
+    lastDiag = now;
+    Serial.printf("diag кадров/с %.1f, отдано /jpg %u, сбоев камеры %u, клиентов потока %d, память %u КБ, PSRAM %u КБ, сигнал %d\n",
+                  fps, jpgServed, fbFails, (int)streamClients, ESP.getFreeHeap() / 1024, ESP.getFreePsram() / 1024, staRssi());
+  }
   if (now - lastFps >= 1000) { fps = (frames - framesAtFps) * 1000.0f / (now - lastFps); framesAtFps = frames; lastFps = now; }
   if (now - lastTele >= 66) {
     lastTele = now;

@@ -83,30 +83,30 @@ function connect(){
  };
 }
 connect();
-const cam=$('#cam');let vms=null,vn=0,vt=performance.now(),fails=0;
-let vmode=localStorage.getItem('vmode')||'frame';             // frame — кадр по запросу, stream — поток MJPEG
-function startStream(){cam.onload=()=>vn++;cam.onerror=()=>setTimeout(()=>{if(vmode==='stream')startStream()},1000);
- cam.src='http://'+location.hostname+':81/stream?'+Date.now();$('#vms').textContent='поток'}
+const cam=$('#cam');let vms=null,vn=0,vt=performance.now(),lastFrame=performance.now();
+let vmode=localStorage.getItem('vmode')||'frame';             // frame — кадр по запросу (:81), stream — поток MJPEG (:83)
+function startStream(){cam.onload=()=>{vn++;lastFrame=performance.now()};cam.onerror=null;
+ cam.src='http://'+location.hostname+':83/stream?'+Date.now()}
 async function video(){
  for(;;){
-  if(vmode!=='frame'){await new Promise(r=>setTimeout(r,500));continue}
-  if(document.hidden){await new Promise(r=>setTimeout(r,300));continue}
-  const t0=performance.now(),ac=new AbortController(),to=setTimeout(()=>ac.abort(),1500);
+  if(vmode!=='frame'||document.hidden){await new Promise(r=>setTimeout(r,300));continue}
+  const t0=performance.now(),ac=new AbortController(),to=setTimeout(()=>ac.abort(),2000);
   try{
    const r=await fetch('http://'+location.hostname+':81/jpg?'+t0,{cache:'no-store',signal:ac.signal});
+   if(!r.ok)throw 0;
    const u=URL.createObjectURL(await r.blob()),old=cam.src;cam.src=u;
    try{await cam.decode()}catch(e){}
    if(old.startsWith('blob:'))URL.revokeObjectURL(old);
-   const dt=performance.now()-t0;vms=vms===null?dt:vms*.8+dt*.2;vn++;fails=0;
-  }catch(e){
-   if(++fails>=4){vmode='stream';startStream();}               // покадровый режим не идёт — страховка потоком
-   await new Promise(r=>setTimeout(r,300));
-  }finally{clearTimeout(to)}
+   const dt=performance.now()-t0;vms=vms===null?dt:vms*.8+dt*.2;vn++;lastFrame=performance.now();
+  }catch(e){await new Promise(r=>setTimeout(r,200))}
+  finally{clearTimeout(to)}
  }
 }
+// сторож: 2.5 с без кадра — поток переоткрываем (покадровый режим перезапрашивает сам)
+setInterval(()=>{if(vmode==='stream'&&!document.hidden&&performance.now()-lastFrame>2500){lastFrame=performance.now();startStream()}},1000);
 if(vmode==='stream')startStream();
 video();
-setInterval(()=>{const now=performance.now();$('#fps').textContent=(vn*1000/(now-vt)).toFixed(0);vn=0;vt=now;if(vms!==null&&vmode==='frame')$('#vms').textContent=Math.round(vms)},1000);
+setInterval(()=>{const now=performance.now();$('#fps').textContent=(vn*1000/(now-vt)).toFixed(0);vn=0;vt=now;$('#vms').textContent=vmode==='frame'?(vms===null?'—':Math.round(vms)):'поток'},1000);
 let lightOn=0;$('#light').onclick=()=>{lightOn^=1;send('light,'+lightOn);$('#light').style.background=lightOn?'#fbbf24':''};
 let lastSend=0;
 function sendCmd(){if(!ws||ws.readyState!==1)return;const i=++id;lastSend=performance.now();sent.set(i,lastSend);if(sent.size>40)sent.clear();
@@ -117,7 +117,7 @@ const send=s=>ws&&ws.readyState===1&&ws.send(s);
 document.querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>send(b.dataset.c));
 $('#max').oninput=e=>{$('#maxv').textContent=Math.round(e.target.value/10)+'%';send('max,'+e.target.value)};
 $('#vmode').value=vmode;
-$('#vmode').onchange=e=>{vmode=e.target.value;localStorage.setItem('vmode',vmode);fails=0;if(vmode==='stream')startStream();else{cam.onload=null;cam.onerror=null;cam.removeAttribute('src')}};
+$('#vmode').onchange=e=>{vmode=e.target.value;localStorage.setItem('vmode',vmode);if(vmode==='stream')startStream();else{cam.onload=null;cam.removeAttribute('src')}};
 $('#res').onchange=e=>send('res,'+e.target.value);
 $('#q').onchange=e=>send('q,'+e.target.value);
 $('#acc').oninput=e=>{$('#accv').textContent=(e.target.value/1000).toFixed(1)+' с';send('acc,'+e.target.value)};

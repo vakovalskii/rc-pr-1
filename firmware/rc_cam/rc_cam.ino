@@ -215,7 +215,9 @@ void startHttp() {
     httpd_register_err_handler(httpPage, HTTPD_404_NOT_FOUND, redirect404);
   }
   httpd_config_t s = HTTPD_DEFAULT_CONFIG();
-  s.server_port = 81; s.ctrl_port = 32769; s.max_open_sockets = 3;
+  // iPhone открывает новое соединение почти на каждый кадр и не спешит закрывать старые:
+  // без вытеснения старых сокетов сервер упирается в лимит и видео встаёт
+  s.server_port = 81; s.ctrl_port = 32769; s.max_open_sockets = 7; s.lru_purge_enable = true;
   if (httpd_start(&httpStream, &s) == ESP_OK) {
     httpd_uri_t st = {"/stream", HTTP_GET, streamHandler, nullptr};      // поток для Pi и сторонних плееров
     httpd_register_uri_handler(httpStream, &st);

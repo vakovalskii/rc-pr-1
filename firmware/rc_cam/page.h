@@ -58,6 +58,7 @@ button.b:active{background:#2a3040}
  <div class="row"><label>разгон</label><input id="acc" type="range" min="100" max="3000" step="100"><b id="accv"></b></div>
  <div class="row"><label>торможение</label><input id="brk" type="range" min="100" max="4000" step="100"><b id="brkv"></b></div>
  <div class="row"><label>видео</label><select id="res"><option value="0">320×240 быстро</option><option value="1">480×320</option><option value="2">640×480 чётко</option></select></div>
+ <div class="row"><label>режим видео</label><select id="vmode"><option value="frame">по кадру — меньше задержка</option><option value="stream">поток — как раньше</option></select></div>
  <div class="row"><label>качество</label><input id="q" type="range" min="8" max="40" step="2"><b id="qv"></b></div>
  <div class="row"><label>руль</label><button class="b" data-c="inv">инвертировать моторчик</button></div>
  <div class="note">руль без датчика положения: держишь стик — колёса повёрнуты</div>
@@ -82,22 +83,30 @@ function connect(){
  };
 }
 connect();
-const cam=$('#cam');let vms=null,vn=0,vt=performance.now();
+const cam=$('#cam');let vms=null,vn=0,vt=performance.now(),fails=0;
+let vmode=localStorage.getItem('vmode')||'frame';             // frame — кадр по запросу, stream — поток MJPEG
+function startStream(){cam.onload=()=>vn++;cam.onerror=()=>setTimeout(()=>{if(vmode==='stream')startStream()},1000);
+ cam.src='http://'+location.hostname+':81/stream?'+Date.now();$('#vms').textContent='поток'}
 async function video(){
  for(;;){
+  if(vmode!=='frame'){await new Promise(r=>setTimeout(r,500));continue}
   if(document.hidden){await new Promise(r=>setTimeout(r,300));continue}
-  const t0=performance.now();
+  const t0=performance.now(),ac=new AbortController(),to=setTimeout(()=>ac.abort(),1500);
   try{
-   const r=await fetch('http://'+location.hostname+':81/jpg?'+t0,{cache:'no-store'});
+   const r=await fetch('http://'+location.hostname+':81/jpg?'+t0,{cache:'no-store',signal:ac.signal});
    const u=URL.createObjectURL(await r.blob()),old=cam.src;cam.src=u;
    try{await cam.decode()}catch(e){}
    if(old.startsWith('blob:'))URL.revokeObjectURL(old);
-   const dt=performance.now()-t0;vms=vms===null?dt:vms*.8+dt*.2;vn++;
-  }catch(e){await new Promise(r=>setTimeout(r,500))}
+   const dt=performance.now()-t0;vms=vms===null?dt:vms*.8+dt*.2;vn++;fails=0;
+  }catch(e){
+   if(++fails>=4){vmode='stream';startStream();}               // покадровый режим не идёт — страховка потоком
+   await new Promise(r=>setTimeout(r,300));
+  }finally{clearTimeout(to)}
  }
 }
+if(vmode==='stream')startStream();
 video();
-setInterval(()=>{const now=performance.now();$('#fps').textContent=(vn*1000/(now-vt)).toFixed(0);vn=0;vt=now;if(vms!==null)$('#vms').textContent=Math.round(vms)},1000);
+setInterval(()=>{const now=performance.now();$('#fps').textContent=(vn*1000/(now-vt)).toFixed(0);vn=0;vt=now;if(vms!==null&&vmode==='frame')$('#vms').textContent=Math.round(vms)},1000);
 let lightOn=0;$('#light').onclick=()=>{lightOn^=1;send('light,'+lightOn);$('#light').style.background=lightOn?'#fbbf24':''};
 let lastSend=0;
 function sendCmd(){if(!ws||ws.readyState!==1)return;const i=++id;lastSend=performance.now();sent.set(i,lastSend);if(sent.size>40)sent.clear();
@@ -107,6 +116,8 @@ setInterval(sendCmd,50);                                       // пульс д�
 const send=s=>ws&&ws.readyState===1&&ws.send(s);
 document.querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>send(b.dataset.c));
 $('#max').oninput=e=>{$('#maxv').textContent=Math.round(e.target.value/10)+'%';send('max,'+e.target.value)};
+$('#vmode').value=vmode;
+$('#vmode').onchange=e=>{vmode=e.target.value;localStorage.setItem('vmode',vmode);fails=0;if(vmode==='stream')startStream();else{cam.onload=null;cam.onerror=null;cam.removeAttribute('src')}};
 $('#res').onchange=e=>send('res,'+e.target.value);
 $('#q').onchange=e=>send('q,'+e.target.value);
 $('#acc').oninput=e=>{$('#accv').textContent=(e.target.value/1000).toFixed(1)+' с';send('acc,'+e.target.value)};

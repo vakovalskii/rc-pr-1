@@ -42,6 +42,7 @@ button.b:active{background:#2a3040}
 <div id="bar">
  <span id="dot"></span><span id="state">связь…</span>
  <span class="s">RTT <b id="rtt">—</b></span>
+ <span class="s">сигнал <b id="rssi">—</b></span>
  <span class="s">ESC <b id="esc">—</b></span>
  <span class="s">видео <b id="fps">—</b> к/с · <b id="vms">—</b> мс</span>
  <button id="light" class="b" style="padding:4px 9px">фара</button>
@@ -71,11 +72,12 @@ function connect(){
  ws.onclose=()=>{$('#dot').style.background='var(--bad)';$('#state').textContent='нет связи';setTimeout(connect,700)};
  ws.onmessage=e=>{
   const p=e.data.split(',');if(p[0]!=='t')return;
-  const [_,ack,esc,mot,fs,inv,max,src,acc,brk,efps,cl,res,q]=p;
+  const [_,ack,esc,mot,fs,inv,max,src,acc,brk,efps,cl,res,q,rssi]=p;
   const t0=sent.get(+ack);if(t0!==undefined){const r=performance.now()-t0;rtt=rtt===null?r:rtt*.8+r*.2;$('#rtt').textContent=Math.round(rtt)+' мс';sent.clear()}
   const st=$('#state');
   if(fs==='1'){st.textContent='FAILSAFE';st.style.color='var(--bad)'}else{st.textContent='едем';st.style.color='var(--ok)'}
   $('#esc').textContent=esc;
+  const r=+rssi;$('#rssi').textContent=r?r+' дБм':'—';$('#rssi').style.color=!r?'':r>-60?'var(--ok)':r>-75?'#fbbf24':'var(--bad)';
   if(!maxSet){$('#max').value=max;$('#maxv').textContent=Math.round(max/10)+'%';$('#acc').value=acc;$('#accv').textContent=(acc/1000).toFixed(1)+' с';$('#brk').value=brk;$('#brkv').textContent=(brk/1000).toFixed(1)+' с';if(document.activeElement!==$('#res'))$('#res').value=res;$('#q').value=q;$('#qv').textContent=(+q<=12?'выше':+q>=24?'ниже':'среднее');maxSet=true}
  };
 }

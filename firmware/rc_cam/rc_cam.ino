@@ -18,13 +18,14 @@
 // полный ток идёт только STEER_PUSH_MS, дальше — удержание STEER_HOLD.
 //
 // Протокол: c,<id>,<руль -1000..1000>,<газ -1000..1000>   max,<0..1000>  acc,<мс>  brk,<мс>  inv  light,<0|1>  res,<0|1|2>  q,<8..40>
-// Ответ:    t,<ack>,<esc_us>,<мотор>,<failsafe>,<inv>,<max>,<источник>,<acc>,<brk>,<fps>,<клиентов>,<res>,<q>
+// Ответ:    t,<ack>,<esc_us>,<мотор>,<failsafe>,<inv>,<max>,<источник>,<acc>,<brk>,<fps>,<клиентов>,<res>,<q>,<RSSI телефона, дБм>
 
 #include <WiFi.h>
 #include <DNSServer.h>
 #include <WebSocketsServer.h>
 #include <Preferences.h>
 #include "esp_camera.h"
+#include "esp_wifi.h"
 #include "esp_http_server.h"
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
@@ -141,10 +142,18 @@ void handle(const char* s, const char* from) {
   else if (!strncmp(s, "q,", 2)) { cfg.q = constrain(atoi(s + 2), 8, 40); prefs.putInt("q", cfg.q); applyCam(); }
 }
 
+int staRssi() {                                   // как ESP слышит телефон: для замера антенны и дальности
+  wifi_sta_list_t l;
+  if (esp_wifi_ap_get_sta_list(&l) != ESP_OK || l.num == 0) return 0;
+  int best = -127;
+  for (int i = 0; i < l.num; i++) best = max(best, (int)l.sta[i].rssi);
+  return best;
+}
+
 String tele() {
-  char b[128];
-  snprintf(b, sizeof b, "t,%ld,%d,%d,%d,%d,%d,%s,%d,%d,%.1f,%d,%d,%d", (long)lastId, escUs, motorOut, failsafe,
-           cfg.inv, cfg.maxThr, src, cfg.accMs, cfg.brkMs, fps, (int)streamClients, cfg.res, cfg.q);
+  char b[160];
+  snprintf(b, sizeof b, "t,%ld,%d,%d,%d,%d,%d,%s,%d,%d,%.1f,%d,%d,%d,%d", (long)lastId, escUs, motorOut, failsafe,
+           cfg.inv, cfg.maxThr, src, cfg.accMs, cfg.brkMs, fps, (int)streamClients, cfg.res, cfg.q, staRssi());
   return String(b);
 }
 

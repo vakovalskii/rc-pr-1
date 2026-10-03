@@ -7,7 +7,7 @@ DIR=$(cd "$(dirname "$0")/.." && pwd)
 CFG=/boot/firmware/config.txt
 
 apt-get update
-apt-get install -y --no-install-recommends python3-picamera2 python3-websockets python3-pil
+apt-get install -y --no-install-recommends python3-picamera2 python3-websockets python3-pil python3-serial
 
 reboot_needed=0
 if ! grep -q '^dtoverlay=pwm-2chan' "$CFG"; then

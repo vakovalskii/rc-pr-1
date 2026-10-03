@@ -6,6 +6,7 @@
     python3 pi_car.py --url ws://192.168.1.84:8080/ws/car          # на Pi
     python3 pi_car.py --dry-run --url ws://127.0.0.1:8080/ws/car   # на маке, без железа
     python3 pi_car.py --neutral                                    # руль в центр, газ в ноль и выйти
+    python3 pi_car.py --esp auto --url ws://...                    # ход и руль через ESP8266 по USB
 
 Что делает:
   * камера через picamera2, аппаратный MJPEG, полный угол сенсора (1296x972 -> 640x480);
@@ -15,9 +16,13 @@
   * газ ограничен --max-throttle (по умолчанию 0.3): первые выезды без сюрпризов;
   * в телеметрии температура SoC и недовольтаж — главная беда Pi 4 на батарее.
 
-Аппаратный ШИМ переживает смерть процесса и держит последнее значение.
-Поэтому systemd после любой остановки вызывает `pi_car.py --neutral`
-(см. pi/rc-car.service). Настоящий независимый сторож — ESP32 на следующем этапе.
+Два способа рулить:
+  * --esp: ESP8266 (firmware/rc_esp) по USB. Pi шлёт ему `c,id,руль,газ` 50 раз в секунду,
+    а ESP сам делает рампу газа, руль по потенциометру и свой failsafe 300 мс —
+    если Pi зависнет или выдернут кабель, машинка встанет без участия Linux;
+  * без --esp: аппаратный ШИМ малины. Он переживает смерть процесса и держит
+    последнее значение, поэтому systemd после остановки вызывает `pi_car.py --neutral`
+    (см. pi/rc-car.service).
 """
 import argparse, asyncio, io, json, math, pathlib, subprocess, time
 
@@ -71,6 +76,52 @@ class Drive:
         self.steer, self.throttle = steer, throttle
         esc_us, servo_us = self.us()
         self.pwm.set_us(ESC, esc_us); self.pwm.set_us(SERVO, servo_us)
+
+    def neutral(self):
+        self.apply(0.0, 0.0)
+
+class EspDrive:
+    """Ход и руль через ESP8266 по USB-серийнику. Тот же интерфейс, что у Drive."""
+    def __init__(self, port, a):
+        import glob, threading, serial
+        if port == "auto":
+            ports = sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*") + glob.glob("/dev/cu.usbserial*"))
+            if not ports: raise SystemExit("ESP не найден: нет /dev/ttyUSB* — проверь USB-кабель (нужен с данными)")
+            port = ports[0]
+        self.port, self.a = port, a
+        self.steer = self.throttle = 0.0
+        self.id, self.tele = 0, {}
+        self.ser = serial.Serial()
+        self.ser.port, self.ser.baudrate, self.ser.timeout, self.ser.write_timeout = port, 115200, 0.2, 0.1
+        self.ser.dtr = self.ser.rts = False                   # не дёргать reset NodeMCU при открытии
+        self.ser.open()
+        threading.Thread(target=self._rx, daemon=True).start()
+
+    def _rx(self):
+        # t,ack,pot,esc_us,motor,fs,mode,potL,potC,potR,inv,max,src,acc,brk
+        while True:
+            try: line = self.ser.readline().decode(errors="replace").strip()
+            except Exception: time.sleep(0.5); continue
+            p = line.split(",")
+            if p[0] == "t" and len(p) >= 13:
+                try: self.tele = {"esp_ack": int(p[1]), "pot": int(p[2]), "esc_us": int(p[3]), "steer_pwm": int(p[4]),
+                                  "esp_failsafe": p[5] == "1", "steer_mode": int(p[6]), "esp_src": p[12]}
+                except ValueError: pass
+            elif line and not line.startswith("t,"):
+                print(f"ESP: {line}")
+
+    def us(self):
+        return self.tele.get("esc_us", 1500), 1500
+
+    def apply(self, steer, throttle):
+        a = self.a
+        self.steer, self.throttle = steer, throttle
+        s = -steer if a.steer_invert else steer
+        t = -throttle if a.esc_invert else throttle
+        t = max(-a.max_reverse, min(a.max_throttle, t))
+        self.id = (self.id + 1) % 1_000_000
+        try: self.ser.write(f"c,{self.id},{round(s * 1000)},{round(t * 1000)}\n".encode())
+        except Exception as e: print(f"ESP: запись не прошла ({e.__class__.__name__})")
 
     def neutral(self):
         self.apply(0.0, 0.0)
@@ -143,9 +194,13 @@ async def ws_connect(url):
 
 async def main(a):
     loop = asyncio.get_running_loop()
-    pwm = FakePwm() if a.dry_run else HwPwm(a.pwmchip)
-    drive = Drive(pwm, a); drive.neutral()
-    print(f"ШИМ: {'фейк' if a.dry_run else pwm.chip}. Нейтраль 2 с — взводим ESC ...")
+    if a.esp:
+        drive = EspDrive(a.esp, a); drive.neutral()
+        print(f"ход и руль: ESP8266 на {drive.port}. Нейтраль 2 с — взводим ESC ...")
+    else:
+        pwm = FakePwm() if a.dry_run else HwPwm(a.pwmchip)
+        drive = Drive(pwm, a); drive.neutral()
+        print(f"ШИМ: {'фейк' if a.dry_run else pwm.chip}. Нейтраль 2 с — взводим ESC ...")
     await asyncio.sleep(0 if a.dry_run else 2.0)
 
     sink = Latest(loop)
@@ -159,6 +214,8 @@ async def main(a):
             if time.monotonic() - state["last_cmd"] > 0.5 or not state["online"]:
                 if not state["failsafe"]: print("FAILSAFE: нет команд — нейтраль")
                 state["failsafe"] = True; drive.neutral()
+            elif a.esp:
+                drive.apply(drive.steer, drive.throttle)   # ESP ждёт команду чаще 300 мс, иначе свой failsafe
             await asyncio.sleep(0.02)
 
     async def doctor():
@@ -194,7 +251,8 @@ async def main(a):
                 esc_us, servo_us = drive.us()
                 await ws.send(json.dumps({"type": "tele", "seq": seq, "ack": state["id"], "failsafe": state["failsafe"],
                                           "thr": round(drive.throttle, 2), "steer": round(drive.steer, 2),
-                                          "esc_us": round(esc_us), "servo_us": round(servo_us), **state["health"]}))
+                                          "esc_us": round(esc_us), "servo_us": round(servo_us),
+                                          **getattr(drive, "tele", {}), **state["health"]}))
                 seq += 1
 
         tasks = [asyncio.create_task(rx()), asyncio.create_task(tx())]
@@ -219,11 +277,14 @@ if __name__ == "__main__":
     p.add_argument("--esc-trim", type=float, default=0, help="сдвиг нейтрали ESC, мкс")
     p.add_argument("--steer-invert", action="store_true")
     p.add_argument("--esc-invert", action="store_true")
+    p.add_argument("--esp", help="порт ESP8266 (/dev/ttyUSB0) или auto: ход и руль через него, а не ШИМ малины")
     p.add_argument("--pwmchip", type=int, help="номер pwmchip, если автоопределение ошиблось")
     p.add_argument("--dry-run", action="store_true", help="без камеры и ШИМ: проверить протокол на маке")
     p.add_argument("--neutral", action="store_true", help="выставить нейтраль и выйти (для systemd)")
     a = p.parse_args()
-    if a.neutral:
+    if a.neutral and a.esp:
+        d = EspDrive(a.esp, a); d.neutral(); print("нейтраль отправлена в ESP")
+    elif a.neutral:
         d = Drive(HwPwm(a.pwmchip), a); d.neutral(); print("нейтраль выставлена")
     else:
         asyncio.run(main(a))

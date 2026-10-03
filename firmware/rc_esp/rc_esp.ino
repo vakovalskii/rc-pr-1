@@ -15,8 +15,8 @@
 //
 // Протокол (текстом, строка на команду; одинаково по WebSocket и USB):
 //   c,<id>,<руль -1000..1000>,<газ -1000..1000>    команда, 20 Гц
-//   mode,<0|1|2>  cal,<l|c|r>  inv  max,<0..1000>  калибровка и настройки
-// Ответ: t,<ack>,<pot>,<esc_us>,<мотор>,<failsafe>,<mode>,<potL>,<potC>,<potR>,<inv>,<max>,<источник>
+//   mode,<0|1|2>  cal,<l|c|r>  inv  max,<0..1000>  acc,<мс>  brk,<мс>  калибровка и настройки
+// Ответ: t,<ack>,<pot>,<esc_us>,<мотор>,<failsafe>,<mode>,<potL>,<potC>,<potR>,<inv>,<max>,<источник>,<разгон мс>,<торможение мс>
 
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
@@ -32,11 +32,12 @@ const char* AP_PASS = "12345678";
 const int PIN_ESC = 5, PIN_IN1 = 14, PIN_IN2 = 12, PIN_LED = 2;
 const uint32_t FAILSAFE_MS = 300;
 
-struct Cfg { uint32_t magic; int16_t potL, potC, potR; uint8_t inv, mode; int16_t maxThr, kp, db, maxPwm, minPwm; };
-const uint32_t MAGIC = 0xB0661E02;
+struct Cfg { uint32_t magic; int16_t potL, potC, potR; uint8_t inv, mode; int16_t maxThr, kp, db, maxPwm, minPwm, accMs, brkMs; };
+const uint32_t MAGIC = 0xB0661E03;
 Cfg cfg;
 
-void cfgDefaults() { cfg = {MAGIC, -1, -1, -1, 0, 0, 300, 4, 12, 700, 250}; }
+// accMs/brkMs: за сколько мс газ прошёл бы всю шкалу 0..100% при разгоне и при торможении
+void cfgDefaults() { cfg = {MAGIC, -1, -1, -1, 0, 0, 300, 4, 12, 700, 250, 600, 1500}; }
 void cfgLoad() { EEPROM.begin(64); EEPROM.get(0, cfg); if (cfg.magic != MAGIC) cfgDefaults(); }
 void cfgSave() { EEPROM.put(0, cfg); EEPROM.commit(); }
 bool calibrated() { return cfg.potL >= 0 && cfg.potC >= 0 && cfg.potR >= 0 && abs(cfg.potR - cfg.potL) > 60; }
@@ -51,6 +52,9 @@ int32_t lastId = -1;
 uint32_t lastCmdMs = 0, stallSince = 0, stallBlockUntil = 0;
 bool failsafe = true;
 int pot = 0, motorOut = 0, escUs = 1500;
+float thrOut = 0;                                          // газ после рампы, -1000..1000
+int lastSign = 0; uint32_t zeroSince = 0;
+const uint32_t FLIP_HOLD_MS = 150, FAILSAFE_STOP_MS = 150;
 const char* src = "-";
 
 int readPot() { return (analogRead(A0) + analogRead(A0)) / 2; }
@@ -65,8 +69,21 @@ void setMotor(int out) {
 void control() {
   uint32_t now = millis();
   failsafe = now - lastCmdMs > FAILSAFE_MS;
-  int thr = failsafe ? 0 : constrain((int)cmdThr, -(int)cfg.maxThr, (int)cfg.maxThr);
-  escUs = 1500 + thr / 2;                                   // ±1000 -> ±500 мкс
+  int target = failsafe ? 0 : constrain((int)cmdThr, -(int)cfg.maxThr, (int)cfg.maxThr);
+  // смена направления: сначала до нуля, нейтраль FLIP_HOLD_MS, потом в другую сторону
+  int tsign = (target > 0) - (target < 0);
+  if (tsign && lastSign && tsign != lastSign) {
+    if (thrOut != 0 || now - zeroSince < FLIP_HOLD_MS) target = 0;
+  }
+  // рампа: разгон и торможение с разной скоростью; failsafe гасит быстро
+  bool braking = abs(target) < fabsf(thrOut) || (target > 0) != (thrOut > 0);
+  float ms = failsafe ? FAILSAFE_STOP_MS : (braking ? cfg.brkMs : cfg.accMs);
+  float step = 1000.0f * 10 / max(ms, 10.0f);              // за такт control() = 10 мс
+  if (thrOut < target) thrOut = min(thrOut + step, (float)target);
+  else if (thrOut > target) thrOut = max(thrOut - step, (float)target);
+  if (thrOut == 0) { if (!zeroSince) zeroSince = now; } else { zeroSince = 0; lastSign = thrOut > 0 ? 1 : -1; }
+  if (thrOut == 0 && zeroSince && now - zeroSince >= FLIP_HOLD_MS) lastSign = 0;
+  escUs = 1500 + (int)(thrOut / 2);                          // ±1000 -> ±500 мкс
   esc.writeMicroseconds(escUs);
 
   pot = readPot();
@@ -110,13 +127,15 @@ void handle(char* s, const char* from) {
   }
   else if (!strcmp(s, "inv")) { cfg.inv = !cfg.inv; cfgSave(); }
   else if (!strncmp(s, "max,", 4)) { cfg.maxThr = constrain(atoi(s + 4), 0, 1000); cfgSave(); }
+  else if (!strncmp(s, "acc,", 4)) { cfg.accMs = constrain(atoi(s + 4), 50, 5000); cfgSave(); }
+  else if (!strncmp(s, "brk,", 4)) { cfg.brkMs = constrain(atoi(s + 4), 50, 5000); cfgSave(); }
   else if (!strcmp(s, "reset")) { cfgDefaults(); cfgSave(); }
 }
 
 String tele() {
   char b[128];
-  snprintf(b, sizeof b, "t,%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s", (long)lastId, pot, escUs, motorOut, failsafe,
-           cfg.mode, cfg.potL, cfg.potC, cfg.potR, cfg.inv, cfg.maxThr, src);
+  snprintf(b, sizeof b, "t,%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d", (long)lastId, pot, escUs, motorOut, failsafe,
+           cfg.mode, cfg.potL, cfg.potC, cfg.potR, cfg.inv, cfg.maxThr, src, cfg.accMs, cfg.brkMs);
   return String(b);
 }
 

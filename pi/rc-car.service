@@ -1,0 +1,17 @@
+[Unit]
+Description=RC-багги: камера и ШИМ, подключение к релею
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/default/rc-car
+WorkingDirectory=__DIR__
+ExecStart=/usr/bin/python3 -u __DIR__/pi_car.py --url ${RELAY} $ARGS
+# аппаратный ШИМ держит последнее значение и после смерти процесса — возвращаем нейтраль всегда
+ExecStopPost=/usr/bin/python3 __DIR__/pi_car.py --neutral
+Restart=always
+RestartSec=1
+User=root
+
+[Install]
+WantedBy=multi-user.target

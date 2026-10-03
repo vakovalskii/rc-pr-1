@@ -9,7 +9,8 @@
 //   GPIO15 -> IN2 драйвера
 //   GPIO4  -> вспышка-светодиод (фара)
 //
-// Видео: пульт тянет :81/jpg по одному кадру (задержка = передача одного кадра);
+// Видео: плата сама шлёт кадры в WebSocket :81/v, в пути не больше VID_WINDOW кадров
+// (телефон подтверждает каждый) — без запроса на кадр и без очереди. :81/jpg — один кадр;
 // :83/stream — обычный MJPEG-поток для Pi и сторонних плееров (отдельный сервер).
 //
 // Руль: у ESP32-CAM все свободные пины с АЦП сидят на ADC2, а ADC2 занят Wi-Fi,
@@ -24,6 +25,7 @@
 #include <DNSServer.h>
 #include <WebSocketsServer.h>
 #include <Preferences.h>
+#include <atomic>
 #include "esp_camera.h"
 #include "esp_wifi.h"
 #include "esp_http_server.h"
@@ -67,7 +69,12 @@ const framesize_t RES[] = {FRAMESIZE_QVGA, FRAMESIZE_HVGA, FRAMESIZE_VGA};   // 
 DNSServer dns;
 WebSocketsServer ws(82);
 httpd_handle_t httpPage = nullptr, httpJpg = nullptr, httpStream = nullptr;
-volatile uint32_t fbFails = 0, jpgServed = 0;
+volatile uint32_t fbFails = 0, jpgServed = 0, wsSent = 0;
+const int VID_WINDOW = 2;                       // кадров в пути до подтверждения
+volatile int vidFd = -1;                        // сокет видео-WebSocket (один зритель, новый вытесняет старого)
+std::atomic<int> vidInFlight{0};
+volatile uint32_t vidAckMs = 0;
+bool camOk = false;
 
 volatile int16_t cmdSteer = 0, cmdThr = 0;
 volatile int32_t lastId = -1;
@@ -187,6 +194,38 @@ esp_err_t jpgHandler(httpd_req_t* req) {
   return r;
 }
 
+// Видео-WebSocket: GET — рукопожатие, дальше любое сообщение от телефона = «кадр получил».
+esp_err_t vidWsHandler(httpd_req_t* req) {
+  if (req->method == HTTP_GET) { vidFd = httpd_req_to_sockfd(req); vidInFlight = 0; vidAckMs = millis(); return ESP_OK; }
+  httpd_ws_frame_t f = {}; uint8_t buf[16];
+  esp_err_t r = httpd_ws_recv_frame(req, &f, 0);
+  if (r != ESP_OK) return r;
+  if (f.len) { f.payload = buf; r = httpd_ws_recv_frame(req, &f, f.len < sizeof buf ? f.len : sizeof buf); }
+  if (vidInFlight > 0) vidInFlight--;
+  vidAckMs = millis();
+  return r;
+}
+
+// Отдельная задача: берёт свежий кадр и шлёт, как только в пути меньше VID_WINDOW.
+void videoTask(void*) {
+  for (;;) {
+    int fd = vidFd;
+    if (fd < 0 || !camOk) { vTaskDelay(20); continue; }
+    if (vidInFlight >= VID_WINDOW) {
+      if (millis() - vidAckMs > 1500) vidInFlight = 0;     // подтверждение потерялось — не виснем
+      vTaskDelay(1); continue;
+    }
+    if (httpd_ws_get_fd_info(httpJpg, fd) != HTTPD_WS_CLIENT_WEBSOCKET) { if (vidFd == fd) vidFd = -1; continue; }
+    camera_fb_t* fb = esp_camera_fb_get();
+    if (!fb) { fbFails++; vTaskDelay(5); continue; }
+    httpd_ws_frame_t f = {}; f.type = HTTPD_WS_TYPE_BINARY; f.final = true; f.payload = fb->buf; f.len = fb->len;
+    vidInFlight++;
+    esp_err_t r = httpd_ws_send_frame_async(httpJpg, fd, &f);
+    esp_camera_fb_return(fb);
+    if (r == ESP_OK) { frames++; wsSent++; } else if (vidFd == fd) vidFd = -1;
+  }
+}
+
 #define BOUNDARY "rcframe"
 esp_err_t streamHandler(httpd_req_t* req) {
   httpd_resp_set_type(req, "multipart/x-mixed-replace;boundary=" BOUNDARY);
@@ -223,6 +262,8 @@ void startHttp() {
   if (httpd_start(&httpJpg, &j) == ESP_OK) {
     httpd_uri_t jpg = {"/jpg", HTTP_GET, jpgHandler, nullptr};
     httpd_register_uri_handler(httpJpg, &jpg);
+    httpd_uri_t v = {}; v.uri = "/v"; v.method = HTTP_GET; v.handler = vidWsHandler; v.is_websocket = true;
+    httpd_register_uri_handler(httpJpg, &v);
   }
   httpd_config_t st = HTTPD_DEFAULT_CONFIG();
   st.server_port = 83; st.ctrl_port = 32770; st.max_open_sockets = 3; st.lru_purge_enable = true;
@@ -244,8 +285,14 @@ bool startCamera() {
   c.grab_mode = CAMERA_GRAB_LATEST;                                 // всегда свежий кадр, без очереди
   if (psramFound()) { c.frame_size = FRAMESIZE_VGA; c.jpeg_quality = 12; c.fb_count = 2; c.fb_location = CAMERA_FB_IN_PSRAM; }
   else              { c.frame_size = FRAMESIZE_QVGA; c.jpeg_quality = 14; c.fb_count = 1; c.fb_location = CAMERA_FB_IN_DRAM; }
-  esp_err_t e = esp_camera_init(&c);
-  if (e == ESP_OK) applyCam();       // буферы под VGA, а реальный размер — из настроек
+  esp_err_t e = ESP_FAIL;
+  for (int i = 0; i < 3 && e != ESP_OK; i++) {     // шлейф/питание не всегда успевают с первого раза
+    if (i) { esp_camera_deinit(); pinMode(PWDN_GPIO_NUM, OUTPUT); digitalWrite(PWDN_GPIO_NUM, HIGH); delay(100);
+             digitalWrite(PWDN_GPIO_NUM, LOW); delay(200); }
+    e = esp_camera_init(&c);
+  }
+  camOk = e == ESP_OK;
+  if (camOk) applyCam();       // буферы под VGA, а реальный размер — из настроек
   Serial.printf("камера: %s, PSRAM %s, %s\n", e == ESP_OK ? "ok" : "ОШИБКА", psramFound() ? "есть" : "нет",
                 psramFound() ? "VGA 640x480" : "QVGA 320x240");
   return e == ESP_OK;
@@ -267,6 +314,7 @@ void setup() {
   dns.start(53, "*", WiFi.softAPIP());
   startHttp();
   ws.begin(); ws.onEvent(onWs);
+  xTaskCreatePinnedToCore(videoTask, "video", 4096, nullptr, 2, nullptr, 0);
   Serial.printf("rc_cam готов: точка %s, http://%s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
 }
 
@@ -286,8 +334,8 @@ void loop() {
   static uint32_t lastDiag = 0;
   if (now - lastDiag >= 5000) {                    // диагностика в USB: видно, что с платой, когда видео встаёт
     lastDiag = now;
-    Serial.printf("diag кадров/с %.1f, отдано /jpg %u, сбоев камеры %u, клиентов потока %d, память %u КБ, PSRAM %u КБ, сигнал %d\n",
-                  fps, jpgServed, fbFails, (int)streamClients, ESP.getFreeHeap() / 1024, ESP.getFreePsram() / 1024, staRssi());
+    Serial.printf("diag кадров/с %.1f, отдано /jpg %u, по ws %u, зритель %d, в пути %d, сбоев камеры %u, клиентов потока %d, память %u КБ, PSRAM %u КБ, сигнал %d\n",
+                  fps, jpgServed, wsSent, vidFd, (int)vidInFlight, fbFails, (int)streamClients, ESP.getFreeHeap() / 1024, ESP.getFreePsram() / 1024, staRssi());
   }
   if (now - lastFps >= 1000) { fps = (frames - framesAtFps) * 1000.0f / (now - lastFps); framesAtFps = frames; lastFps = now; }
   if (now - lastTele >= 66) {

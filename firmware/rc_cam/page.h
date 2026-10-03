@@ -58,7 +58,7 @@ button.b:active{background:#2a3040}
  <div class="row"><label>разгон</label><input id="acc" type="range" min="100" max="3000" step="100"><b id="accv"></b></div>
  <div class="row"><label>торможение</label><input id="brk" type="range" min="100" max="4000" step="100"><b id="brkv"></b></div>
  <div class="row"><label>видео</label><select id="res"><option value="0">320×240 быстро</option><option value="1">480×320</option><option value="2">640×480 чётко</option></select></div>
- <div class="row"><label>режим видео</label><select id="vmode"><option value="frame">по кадру — меньше задержка</option><option value="stream">поток — как раньше</option></select></div>
+ <div class="row"><label>режим видео</label><select id="vmode"><option value="ws">быстрый — плата шлёт сама</option><option value="frame">по кадру</option><option value="stream">поток — как раньше</option></select></div>
  <div class="row"><label>качество</label><input id="q" type="range" min="8" max="40" step="2"><b id="qv"></b></div>
  <div class="row"><label>руль</label><button class="b" data-c="inv">инвертировать моторчик</button></div>
  <div class="note">руль без датчика положения: держишь стик — колёса повёрнуты</div>
@@ -84,7 +84,21 @@ function connect(){
 }
 connect();
 const cam=$('#cam');let vms=null,vn=0,vt=performance.now(),lastFrame=performance.now();
-let vmode=localStorage.getItem('vmode')||'frame';             // frame — кадр по запросу (:81), stream — поток MJPEG (:83)
+let vmode=localStorage.getItem('vmode2')||'ws';               // ws — плата шлёт кадры сама (:81/v), frame — кадр по запросу (:81/jpg), stream — MJPEG (:83)
+let vws=null,pend=null,drawing=false,vlast=0;
+function startWs(){
+ if(vws)return;vws=new WebSocket('ws://'+location.hostname+':81/v');vws.binaryType='blob';
+ vws.onmessage=e=>{try{vws.send('a')}catch(_){}pend=e.data;draw()};      // подтверждаем сразу, рисуем только свежий
+ vws.onclose=()=>{vws=null;if(vmode==='ws'&&!document.hidden)setTimeout(startWs,400)};
+}
+function stopWs(){if(vws){const w=vws;vws=null;w.onclose=null;w.close()}}
+async function draw(){
+ if(drawing)return;drawing=true;
+ while(pend){const b=pend;pend=null;const u=URL.createObjectURL(b),old=cam.src;cam.src=u;try{await cam.decode()}catch(e){}
+  if(old.startsWith('blob:'))URL.revokeObjectURL(old);
+  const now=performance.now();if(vlast){const dt=now-vlast;vms=vms===null?dt:vms*.8+dt*.2}vlast=now;vn++;lastFrame=now}
+ drawing=false;
+}
 function startStream(){cam.onload=()=>{vn++;lastFrame=performance.now()};cam.onerror=null;
  cam.src='http://'+location.hostname+':83/stream?'+Date.now()}
 async function video(){
@@ -103,10 +117,12 @@ async function video(){
  }
 }
 // сторож: 2.5 с без кадра — поток переоткрываем (покадровый режим перезапрашивает сам)
-setInterval(()=>{if(vmode==='stream'&&!document.hidden&&performance.now()-lastFrame>2500){lastFrame=performance.now();startStream()}},1000);
-if(vmode==='stream')startStream();
+setInterval(()=>{if(document.hidden||performance.now()-lastFrame<=2500)return;lastFrame=performance.now();
+ if(vmode==='stream')startStream();else if(vmode==='ws'){stopWs();startWs()}},1000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&vmode==='ws')startWs()});
+if(vmode==='stream')startStream();if(vmode==='ws')startWs();
 video();
-setInterval(()=>{const now=performance.now();$('#fps').textContent=(vn*1000/(now-vt)).toFixed(0);vn=0;vt=now;$('#vms').textContent=vmode==='frame'?(vms===null?'—':Math.round(vms)):'поток'},1000);
+setInterval(()=>{const now=performance.now();$('#fps').textContent=(vn*1000/(now-vt)).toFixed(0);vn=0;vt=now;$('#vms').textContent=vmode==='stream'?'поток':(vms===null?'—':Math.round(vms))},1000);
 let lightOn=0;$('#light').onclick=()=>{lightOn^=1;send('light,'+lightOn);$('#light').style.background=lightOn?'#fbbf24':''};
 let lastSend=0;
 function sendCmd(){if(!ws||ws.readyState!==1)return;const i=++id;lastSend=performance.now();sent.set(i,lastSend);if(sent.size>40)sent.clear();
@@ -117,7 +133,8 @@ const send=s=>ws&&ws.readyState===1&&ws.send(s);
 document.querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>send(b.dataset.c));
 $('#max').oninput=e=>{$('#maxv').textContent=Math.round(e.target.value/10)+'%';send('max,'+e.target.value)};
 $('#vmode').value=vmode;
-$('#vmode').onchange=e=>{vmode=e.target.value;localStorage.setItem('vmode',vmode);if(vmode==='stream')startStream();else{cam.onload=null;cam.removeAttribute('src')}};
+$('#vmode').onchange=e=>{vmode=e.target.value;localStorage.setItem('vmode2',vmode);vms=null;vlast=0;
+ if(vmode!=='ws')stopWs();if(vmode==='stream')startStream();else{cam.onload=null;cam.removeAttribute('src');if(vmode==='ws')startWs()}};
 $('#res').onchange=e=>send('res,'+e.target.value);
 $('#q').onchange=e=>send('q,'+e.target.value);
 $('#acc').oninput=e=>{$('#accv').textContent=(e.target.value/1000).toFixed(1)+' с';send('acc,'+e.target.value)};

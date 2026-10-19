@@ -8,7 +8,7 @@
   html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
     font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;touch-action:none;overscroll-behavior:none}
   #view{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
-  #hud{position:fixed;top:calc(env(safe-area-inset-top) + 8px);left:8px;right:8px;
+  #hud{position:fixed;z-index:2;top:calc(env(safe-area-inset-top) + 8px);left:8px;right:8px;
     display:flex;gap:6px;flex-wrap:wrap;pointer-events:none}
   .chip{background:rgba(15,17,21,.82);border:1px solid #2a3040;border-radius:6px;padding:4px 8px;white-space:nowrap}
   .chip b{color:var(--acc);font-weight:600}
@@ -27,6 +27,18 @@
   .kb{display:none;color:#5b6472} @media (hover:hover){.kb{display:inline}}
   .hit{animation:hit .4s}
   @keyframes hit{0%{background:#7f1d1d}100%{background:rgba(15,17,21,.82)}}
+  #board{position:fixed;right:8px;top:calc(env(safe-area-inset-top) + 44px);width:310px;max-height:calc(100% - 120px);overflow:auto;
+    background:rgba(15,17,21,.9);border:1px solid #2a3040;border-radius:8px;padding:8px 10px;z-index:3;display:none}
+  #board.open{display:block}
+  #board table{width:100%;border-collapse:collapse} #board td{padding:1px 0;vertical-align:top}
+  #board td:first-child{color:var(--dim);padding-right:8px} #board td:last-child{text-align:right}
+  #board h4{margin:8px 0 4px;color:var(--acc);font-size:12px;font-weight:600}
+  #board .btns{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+  #board button{font:inherit;color:var(--fg);background:#1c2230;border:1px solid #2a3040;border-radius:5px;padding:3px 7px;cursor:pointer}
+  #board button.on{border-color:var(--acc);color:var(--acc)}
+  #potbar{height:8px;background:#1c2230;border-radius:4px;position:relative;margin:4px 0}
+  #potbar i{position:absolute;top:-2px;width:3px;height:12px;background:var(--acc)} #potbar u{position:absolute;top:0;width:2px;height:8px;background:#5b6472}
+  #boardBtn{pointer-events:auto;cursor:pointer;user-select:none}
 </style>
 
 <img id="view" alt="">
@@ -40,6 +52,21 @@
   <div class="chip" id="pos" style="display:none">x <b id="px">0</b> y <b id="py">0</b> удары <b id="hits">0</b></div>
   <div class="chip" id="ap" style="display:none"><span class="ok">АВТОПИЛОТ</span> — стрелки перехватят</div>
   <div class="chip" id="reset" title="в точку старта">↺ старт</div>
+  <div class="chip" id="boardBtn">борт ▾</div>
+</div>
+<div id="board">
+  <h4>руль (ESP8266)</h4>
+  <div id="potbar"><u id="pl"></u><u id="pc"></u><u id="pr"></u><i id="pk"></i></div>
+  <table id="tSteer"></table>
+  <div class="btns">
+    <button data-esp="mode,0">выкл</button><button data-esp="mode,1">ручной</button><button data-esp="mode,2">по потенциометру</button>
+  </div>
+  <div class="btns">
+    <button data-esp="cal,l">калибр. лево</button><button data-esp="cal,c">центр</button><button data-esp="cal,r">право</button><button data-esp="inv">инверт</button>
+  </div>
+  <h4>ход</h4><table id="tDrive"></table>
+  <h4>связь</h4><table id="tLink"></table>
+  <h4>малина</h4><table id="tPi"></table>
 </div>
 <canvas id="mini" width="150" height="150"></canvas>
 <div id="pads">
@@ -73,7 +100,8 @@ function connect(){
         }
         $('#fs').innerHTML = m.failsafe
           ? '<span class="bad">FAILSAFE</span>'
-          : `<span class="ok">v ${m.speed}</span>`;
+          : `<span class="ok">${m.speed !== undefined ? 'v ' + m.speed : 'едем'}</span>`;
+        board(m);
         if (m.x !== undefined) {                       // машинка в полигоне — есть карта
           $('#pos').style.display = '';
           $('#px').textContent = m.x.toFixed(2); $('#py').textContent = m.y.toFixed(2);
@@ -95,6 +123,44 @@ function connect(){
   };
 }
 connect();
+
+// --- панель «борт»: всё, что шлёт машинка ---------------------------------
+const MODES = ['выкл', 'ручной', 'по потенциометру'];
+const yes = v => v ? '<span class="bad">да</span>' : '<span class="ok">нет</span>';
+function rows(id, list){
+  $(id).innerHTML = list.filter(r => r[1] !== undefined && r[1] !== null)
+    .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+}
+function board(m){
+  if (!$('#board').classList.contains('open')) return;
+  if (m.pot !== undefined) {
+    const x = v => (Math.max(0, Math.min(1023, v)) / 1023 * 100) + '%';
+    $('#pk').style.left = x(m.pot);
+    for (const [el, v] of [['#pl', m.potL], ['#pc', m.potC], ['#pr', m.potR]]) {
+      $(el).style.display = v >= 0 ? '' : 'none'; if (v >= 0) $(el).style.left = x(v);
+    }
+  }
+  document.querySelectorAll('#board button[data-esp^="mode,"]').forEach(b =>
+    b.classList.toggle('on', b.dataset.esp === 'mode,' + m.steer_mode));
+  const cal = v => v >= 0 ? v : '—';
+  rows('#tSteer', [['потенциометр A0', m.pot], ['калибровка Л / Ц / П', m.pot !== undefined ? `${cal(m.potL)} / ${cal(m.potC)} / ${cal(m.potR)}` : undefined],
+    ['режим', MODES[m.steer_mode]], ['ШИМ моторчика', m.steer_pwm], ['инверсия', m.inv === undefined ? undefined : (m.inv ? 'да' : 'нет')],
+    ['команда руля', m.steer]]);
+  rows('#tDrive', [['газ (команда)', m.thr], ['регулятор, мкс', m.esc_us], ['потолок газа ESP', m.max_thr !== undefined ? Math.round(m.max_thr / 10) + '%' : undefined],
+    ['разгон / торможение', m.acc_ms !== undefined ? `${m.acc_ms} / ${m.brk_ms} мс` : undefined]]);
+  rows('#tLink', [['failsafe малины', m.failsafe === undefined ? undefined : yes(m.failsafe)], ['failsafe ESP', m.esp_failsafe === undefined ? undefined : yes(m.esp_failsafe)],
+    ['последний ответ ESP', m.esp_age_ms !== undefined ? (m.esp_age_ms === null ? '<span class="bad">нет связи</span>' : m.esp_age_ms + ' мс') : undefined],
+    ['команды ESP от', m.esp_src], ['Wi-Fi малины', m.wifi_dbm !== undefined ? m.wifi_dbm + ' дБм' : undefined]]);
+  rows('#tPi', [['камера', m.cam], ['температура', m.temp !== undefined ? m.temp + ' °C' : undefined],
+    ['нагрузка CPU', m.cpu_load], ['свободно ОЗУ', m.mem_free_mb !== undefined ? m.mem_free_mb + ' МБ' : undefined],
+    ['недовольтаж сейчас', m.undervolt === undefined ? undefined : yes(m.undervolt)], ['недовольтаж был', m.undervolt_seen === undefined ? undefined : yes(m.undervolt_seen)],
+    ['троттлинг', m.throttled === undefined ? undefined : yes(m.throttled)], ['аптайм', m.uptime_s !== undefined ? Math.floor(m.uptime_s / 60) + ' мин' : undefined]]);
+}
+$('#boardBtn').addEventListener('pointerdown', e => { e.stopPropagation(); $('#board').classList.toggle('open'); });
+$('#board').addEventListener('pointerdown', e => e.stopPropagation());
+document.querySelectorAll('#board button[data-esp]').forEach(b => b.addEventListener('click', () => {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({type: 'esp', cmd: b.dataset.esp}));
+}));
 
 // команды шлём с фиксированным темпом, а не по каждому касанию:
 // так поток предсказуем, и failsafe на борту получает ровный пульс

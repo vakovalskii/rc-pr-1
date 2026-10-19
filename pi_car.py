@@ -91,7 +91,7 @@ class EspDrive:
             port = ports[0]
         self.port, self.a = port, a
         self.steer = self.throttle = 0.0
-        self.id, self.tele = 0, {}
+        self.id, self.tele, self.tele_at = 0, {}, 0.0
         self.ser = serial.Serial()
         self.ser.port, self.ser.baudrate, self.ser.timeout, self.ser.write_timeout = port, 115200, 0.2, 0.1
         self.ser.dtr = self.ser.rts = False                   # не дёргать reset NodeMCU при открытии
@@ -104,15 +104,30 @@ class EspDrive:
             try: line = self.ser.readline().decode(errors="replace").strip()
             except Exception: time.sleep(0.5); continue
             p = line.split(",")
-            if p[0] == "t" and len(p) >= 13:
-                try: self.tele = {"esp_ack": int(p[1]), "pot": int(p[2]), "esc_us": int(p[3]), "steer_pwm": int(p[4]),
-                                  "esp_failsafe": p[5] == "1", "steer_mode": int(p[6]), "esp_src": p[12]}
+            if p[0] == "t" and len(p) >= 15:
+                try:
+                    self.tele = {"esp_ack": int(p[1]), "pot": int(p[2]), "esc_us": int(p[3]), "steer_pwm": int(p[4]),
+                                 "esp_failsafe": p[5] == "1", "steer_mode": int(p[6]),
+                                 "potL": int(p[7]), "potC": int(p[8]), "potR": int(p[9]), "inv": p[10] == "1",
+                                 "max_thr": int(p[11]), "esp_src": p[12], "acc_ms": int(p[13]), "brk_ms": int(p[14])}
+                    self.tele_at = time.monotonic()
                 except ValueError: pass
             elif line and not line.startswith("t,"):
                 print(f"ESP: {line}")
 
     def us(self):
         return self.tele.get("esc_us", 1500), 1500
+
+    ALLOWED = ("mode,", "cal,", "inv", "max,", "acc,", "brk,")
+    def raw(self, cmd):
+        """Настройки ESP с пульта: режим руля, калибровка, инверсия, потолок газа, рампы."""
+        cmd = str(cmd).strip()
+        if cmd.startswith(self.ALLOWED) and len(cmd) < 24 and "\n" not in cmd:
+            self.ser.write((cmd + "\n").encode()); print(f"ESP ← {cmd}")
+
+    def status(self):
+        age = time.monotonic() - self.tele_at if self.tele_at else None
+        return {**self.tele, "esp_age_ms": None if age is None else round(age * 1000)}
 
     def apply(self, steer, throttle):
         a = self.a
@@ -177,6 +192,14 @@ async def fake_camera(sink, a, drive):
 # --------------------------------------------------------------- здоровье ---
 def health():
     out = {}
+    try:
+        out["cpu_load"] = float(pathlib.Path("/proc/loadavg").read_text().split()[0])
+        mi = dict(l.split(":", 1) for l in pathlib.Path("/proc/meminfo").read_text().splitlines())
+        out["mem_free_mb"] = int(mi["MemAvailable"].split()[0]) // 1024
+        out["uptime_s"] = int(float(pathlib.Path("/proc/uptime").read_text().split()[0]))
+        for l in pathlib.Path("/proc/net/wireless").read_text().splitlines()[2:]:
+            out["wifi_dbm"] = int(float(l.split()[3]))
+    except Exception: pass
     try: out["temp"] = round(int(pathlib.Path("/sys/class/thermal/thermal_zone0/temp").read_text()) / 1000, 1)
     except Exception: pass
     try:
@@ -208,10 +231,12 @@ async def main(a):
     await asyncio.sleep(0 if a.dry_run else 2.0)
 
     sink = Latest(loop)
+    state = {"last_cmd": -1.0, "id": -1, "failsafe": True, "health": {}, "online": False, "cam": "ok"}
     if a.dry_run: asyncio.create_task(fake_camera(sink, a, drive))
-    else: cam = start_picamera(sink, a)
-
-    state = {"last_cmd": -1.0, "id": -1, "failsafe": True, "health": {}, "online": False}
+    else:
+        try: cam = start_picamera(sink, a)
+        except Exception as e:                            # без камеры всё равно рулим и шлём телеметрию
+            state["cam"] = "не найдена (шлейф?)"; print(f"КАМЕРА НЕ ЗАПУСТИЛАСЬ: {e}")
 
     async def control():                                  # 50 Гц: failsafe живёт здесь, а не в сети
         while True:
@@ -243,20 +268,24 @@ async def main(a):
             async for raw in ws:
                 try: m = json.loads(raw)
                 except Exception: continue
+                if m.get("type") == "esp" and hasattr(drive, "raw"):
+                    drive.raw(m.get("cmd", "")); continue
                 if m.get("type", "cmd") != "cmd": continue
                 state["last_cmd"], state["id"], state["failsafe"] = time.monotonic(), m.get("id", -1), False
                 drive.apply(max(-1.0, min(1.0, float(m.get("steer", 0)))), max(-1.0, min(1.0, float(m.get("throttle", 0)))))
 
         async def tx():
             seq = 0
-            while True:
-                jpeg = await sink.get()
-                await ws.send(jpeg)
+            while True:                                   # телеметрия не реже 10 раз в секунду, даже без камеры
+                try: jpeg = await asyncio.wait_for(sink.get(), 0.1)
+                except asyncio.TimeoutError: jpeg = None
+                if jpeg is not None: await ws.send(jpeg)
                 esc_us, servo_us = drive.us()
                 await ws.send(json.dumps({"type": "tele", "seq": seq, "ack": state["id"], "failsafe": state["failsafe"],
                                           "thr": round(drive.throttle, 2), "steer": round(drive.steer, 2),
                                           "esc_us": round(esc_us), "servo_us": round(servo_us),
-                                          **getattr(drive, "tele", {}), **state["health"]}))
+                                          "cam": state["cam"],
+                                          **(drive.status() if hasattr(drive, "status") else {}), **state["health"]}))
                 seq += 1
 
         tasks = [asyncio.create_task(rx()), asyncio.create_task(tx())]

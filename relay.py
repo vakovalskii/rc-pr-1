@@ -118,7 +118,8 @@ async def ws_pult(request):
             if (m.get("type") == "cmd" and ws not in hub.pilots and hub.pilots
                     and not m.get("steer") and not m.get("throttle")):
                 continue
-            hub.last_cmd = m
+            if m.get("type", "cmd") == "cmd":
+                hub.last_cmd = m
             if hub.car is not None:
                 await hub.car.send_str(msg.data)        # команда на борт
     finally:

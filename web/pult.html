@@ -103,6 +103,38 @@
     width:150px;height:150px;border:1px solid var(--line);border-radius:8px;background:#15181dd9;display:none;pointer-events:none}
   .hit{animation:hit .4s} @keyframes hit{from{background:#7f1d1d}to{background:#15181dd9}}
 
+  /* OSD: показания поверх видео, как в FPV-очках */
+  #osd{position:fixed;inset:0;z-index:4;pointer-events:none;font:600 14px/1.25 var(--mono);color:#f4f2ec;
+    text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 4px #000;letter-spacing:.02em}
+  #osd.off{display:none}
+  #osd .blk{position:absolute;display:flex;flex-direction:column;gap:2px}
+  #osd .lbl{color:#cfcabd;font-size:11px;font-weight:700;letter-spacing:.08em}
+  #osd .big{font-size:20px}
+  #osdTL{left:calc(env(safe-area-inset-left) + 18px);top:calc(env(safe-area-inset-top) + 62px)}
+  #osdTR{right:calc(env(safe-area-inset-right) + 18px);top:calc(env(safe-area-inset-top) + 62px);align-items:flex-end}
+  #osdCross{position:absolute;left:50%;top:50%;width:28px;height:28px;margin:-14px 0 0 -14px;opacity:.75}
+  #osdCross::before,#osdCross::after{content:"";position:absolute;background:#f4f2ec;box-shadow:0 0 0 1px #000}
+  #osdCross::before{left:13px;top:0;bottom:0;width:2px} #osdCross::after{top:13px;left:0;right:0;height:2px}
+  #osdWarn{position:absolute;left:0;right:0;top:34%;text-align:center;font-size:30px;color:var(--bad);display:none}
+  #osdWarn.on{display:block;animation:blink 1s steps(2,start) infinite}
+  @keyframes blink{to{visibility:hidden}}
+  #osdThr{position:absolute;left:calc(env(safe-area-inset-left) + 22px);top:50%;height:34vh;margin-top:-17vh;width:10px;
+    border:2px solid #f4f2ec;box-shadow:0 0 0 1px #000,inset 0 0 0 1px #000}
+  #osdThr i{position:absolute;left:0;right:0;bottom:50%;background:var(--amber)}
+  #osdThr::after{content:"";position:absolute;left:-6px;right:-6px;top:50%;height:2px;background:#f4f2ec}
+  #osdThrV{position:absolute;left:calc(env(safe-area-inset-left) + 44px);top:50%;transform:translateY(-50%)}
+  #osdSteer{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom) + 30px);width:min(34vw,320px);margin-left:calc(min(34vw,320px) / -2);
+    height:10px;border:2px solid #f4f2ec;box-shadow:0 0 0 1px #000,inset 0 0 0 1px #000}
+  #osdSteer i{position:absolute;top:-6px;bottom:-6px;width:4px;margin-left:-2px;left:50%;background:var(--amber);box-shadow:0 0 0 1px #000}
+  #osdSteer b{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;left:50%;background:#f4f2ec}
+  #osdSteerV{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 46px);text-align:center}
+  .bars{display:inline-flex;gap:2px;align-items:flex-end;height:14px;margin-left:6px;vertical-align:-1px}
+  .bars span{width:4px;background:#f4f2ec;box-shadow:0 0 0 1px #000;opacity:.25}
+  .bars span.on{opacity:1}
+  @media (max-height:460px){ #osdTL,#osdTR{top:calc(env(safe-area-inset-top) + 56px)} #osd{font-size:12px} #osd .big{font-size:16px}
+    #osdThr,#osdThrV{display:none} }
+  body.osd .wide{display:none}
+
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -121,8 +153,30 @@
   <span class="grow"></span>
   <button class="btn" id="gpBtn" style="display:none" title="геймпад подключён">геймпад</button>
   <button class="btn" id="resetBtn" style="display:none" title="на старт (R)">↺ старт</button>
+  <button class="btn on" id="osdBtn" title="показания поверх видео (O)">OSD</button>
   <button class="btn" data-open="tele">телеметрия</button>
   <button class="btn" data-open="set">настройки</button>
+</div>
+
+<div id="osd">
+  <div class="blk" id="osdTL">
+    <span><span class="lbl">ВРЕМЯ </span><span class="big" id="oTime">00:00</span></span>
+    <span><span class="lbl">ОТКЛИК </span><span id="oRtt">—</span></span>
+    <span><span class="lbl">ВИДЕО </span><span id="oFps">—</span></span>
+  </div>
+  <div class="blk" id="osdTR">
+    <span><span class="lbl">WI-FI </span><span id="oWifi">—</span><span class="bars" id="oBars"><span style="height:4px"></span><span style="height:7px"></span><span style="height:10px"></span><span style="height:14px"></span></span></span>
+    <span><span class="lbl">CPU </span><span id="oTemp">—</span></span>
+    <span><span class="lbl">ESC </span><span id="oEsc">—</span></span>
+    <span id="oPotRow"><span class="lbl">РУЛЬ ДАТЧ </span><span id="oPot">—</span></span>
+    <span id="oVolt" style="color:var(--bad);display:none">ПИТАНИЕ ПРОСЕЛО</span>
+  </div>
+  <div id="osdCross"></div>
+  <div id="osdWarn">FAILSAFE</div>
+  <div id="osdThr"><i id="oThrBar"></i></div>
+  <div id="osdThrV"><span class="lbl">ГАЗ</span><br><span class="big" id="oThr">0%</span></div>
+  <div id="osdSteerV"><span class="lbl">РУЛЬ </span><span id="oSteer">0%</span></div>
+  <div id="osdSteer"><b></b><i id="oSteerMark"></i></div>
 </div>
 
 <canvas id="mini" width="150" height="150"></canvas>
@@ -232,7 +286,7 @@ function connect(){
       const r = performance.now() - t0; rttEMA = rttEMA === null ? r : rttEMA * .8 + r * .2;
       $('#rtt').textContent = Math.round(rttEMA); pending.clear();
     }
-    last = m; setState(m); syncEsp(m); renderTele(m);
+    last = m; setState(m); syncEsp(m); renderTele(m); osdTele(m);
     if (m.wifi_dbm !== undefined) { $('#wifiPill').style.display = 'flex'; $('#wifi').textContent = m.wifi_dbm; }
     if (m.x !== undefined) {
       $('#pos').style.display = 'flex'; $('#resetBtn').style.display = '';
@@ -318,16 +372,56 @@ function kbTick(){
 // ---------- геймпад ----------
 let gpLive = false;
 const dz = v => Math.abs(v) < .08 ? 0 : (v - Math.sign(v) * .08) / .92;
-addEventListener('gamepadconnected', e => { $('#gpBtn').style.display = ''; $('#gpBtn').textContent = 'геймпад: ' + e.gamepad.id.split('(')[0].trim().slice(0, 18); });
-addEventListener('gamepaddisconnected', () => { $('#gpBtn').style.display = 'none'; if (gpLive) { throttle = steer = 0; gpLive = false; } });
+addEventListener('gamepadconnected', e => { $('#gpBtn').textContent = 'геймпад: ' + e.gamepad.id.split('(')[0].trim().slice(0, 18); });
+addEventListener('gamepaddisconnected', () => { gpArmed = false; $('#gpBtn').style.display = 'none'; if (gpLive) { throttle = steer = 0; gpLive = false; } });
+let gpArmed = false;          // геймпад слушаем только после нажатия на нём кнопки: «фантомные» устройства с осями не рулят
 function gpTick(){
   const g = (navigator.getGamepads ? [...navigator.getGamepads()] : []).find(Boolean); if (!g) return;
+  if (!gpArmed) { if (g.buttons.some(b => b.pressed)) { gpArmed = true; $('#gpBtn').style.display = ''; } else return; }
   const ax = i => dz(g.axes[i] || 0), bt = i => (g.buttons[i] && g.buttons[i].value) || 0;
   const trig = bt(7) - bt(6), t = Math.abs(trig) > .05 ? trig : -ax(1), s = g.axes.length > 2 ? ax(2) : ax(0);
   if (t || s) { throttle = t; steer = s; gpLive = true; kbLive = false; }
   else if (gpLive) { throttle = steer = 0; gpLive = false; }
   if (g.buttons[3] && g.buttons[3].pressed) sendReset();
 }
+
+// ---------- OSD поверх видео ----------
+let osdOn = true; try { osdOn = localStorage.getItem('osd') !== '0'; } catch {}
+function setOsd(v){ osdOn = v; $('#osd').classList.toggle('off', !v); document.body.classList.toggle('osd', v); $('#osdBtn').classList.toggle('on', v);
+  try { localStorage.setItem('osd', v ? '1' : '0'); } catch {} }
+setOsd(osdOn);
+$('#osdBtn').addEventListener('click', () => setOsd(!osdOn));
+addEventListener('keydown', e => { if (e.code === 'KeyO' && e.target.tagName !== 'INPUT') setOsd(!osdOn); });
+let driveMs = 0, lastOsd = performance.now(), fpsShown = 0;
+function osdTick(){
+  const now = performance.now(), dt = now - lastOsd; lastOsd = now;
+  if (Math.abs(throttle) > .02 && ws && ws.readyState === 1) driveMs += dt;     // время езды: пока газ не ноль
+  const sec = Math.floor(driveMs / 1000);
+  $('#oTime').textContent = String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0');
+  const t = Math.round(throttle * 100), s = Math.round(steer * 100);
+  $('#oThr').textContent = t + '%';
+  const bar = $('#oThrBar');
+  if (t >= 0) { bar.style.bottom = '50%'; bar.style.top = (50 - t / 2) + '%'; } else { bar.style.top = '50%'; bar.style.bottom = (50 + t / 2) + '%'; }
+  $('#oSteer').textContent = s + '%';
+  $('#oSteerMark').style.left = (50 + s / 2) + '%';
+}
+function osdTele(m){
+  $('#oRtt').textContent = rttEMA === null ? '—' : Math.round(rttEMA) + ' мс';
+  const fs = m.failsafe || m.esp_failsafe;
+  $('#osdWarn').classList.toggle('on', !!fs);
+  if (m.wifi_dbm !== undefined) {
+    $('#oWifi').textContent = m.wifi_dbm + ' дБм';
+    const n = m.wifi_dbm > -55 ? 4 : m.wifi_dbm > -65 ? 3 : m.wifi_dbm > -75 ? 2 : 1;
+    $$('#oBars span').forEach((b, i) => b.classList.toggle('on', i < n));
+  }
+  $('#oTemp').textContent = m.temp !== undefined ? m.temp + '°C' + (m.cpu_load !== undefined ? ' · ' + m.cpu_load : '') : '—';
+  $('#oEsc').textContent = m.esc_us !== undefined ? m.esc_us + ' мкс' : '—';
+  $('#oPotRow').style.display = m.pot !== undefined ? '' : 'none';
+  if (m.pot !== undefined) $('#oPot').textContent = m.pot;
+  $('#oVolt').style.display = m.undervolt ? '' : 'none';
+}
+setInterval(() => { $('#oFps').textContent = $('#fps').textContent + ' к/с'; }, 1000);
+(function loop(){ osdTick(); requestAnimationFrame(loop); })();
 
 // ---------- панели ----------
 function closeDrawers(){ $$('.drawer').forEach(d => d.classList.remove('open')); $('#scrim').classList.remove('on');

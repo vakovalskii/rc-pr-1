@@ -85,7 +85,8 @@ class EspDrive:
     def __init__(self, port, a):
         import glob, threading, serial
         if port == "auto":
-            ports = sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*") + glob.glob("/dev/cu.usbserial*"))
+            ports = sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*") + glob.glob("/dev/cu.usbserial*")) \
+                    or glob.glob("/dev/serial0")                 # UART на пинах 14/15 (Pi Zero)
             if not ports: raise SystemExit("ESP не найден: нет /dev/ttyUSB* — проверь USB-кабель (нужен с данными)")
             port = ports[0]
         self.port, self.a = port, a
@@ -153,6 +154,9 @@ def start_picamera(sink, a):
         main={"size": (a.width, a.height), "format": "YUV420"},
         sensor={"output_size": (1296, 972)},               # биннинг всего сенсора: весь угол 160°
         controls={"FrameRate": a.fps}, buffer_count=4)
+    if a.rotate180:
+        from libcamera import Transform
+        cfg["transform"] = Transform(hflip=1, vflip=1)
     cam.configure(cfg)
     cam.start_recording(MJPEGEncoder(bitrate=a.bitrate), FileOutput(Out()))
     return cam
@@ -277,6 +281,7 @@ if __name__ == "__main__":
     p.add_argument("--esc-trim", type=float, default=0, help="сдвиг нейтрали ESC, мкс")
     p.add_argument("--steer-invert", action="store_true")
     p.add_argument("--esc-invert", action="store_true")
+    p.add_argument("--rotate180", action="store_true", help="камера стоит вверх ногами")
     p.add_argument("--esp", help="порт ESP8266 (/dev/ttyUSB0) или auto: ход и руль через него, а не ШИМ малины")
     p.add_argument("--pwmchip", type=int, help="номер pwmchip, если автоопределение ошиблось")
     p.add_argument("--dry-run", action="store_true", help="без камеры и ШИМ: проверить протокол на маке")

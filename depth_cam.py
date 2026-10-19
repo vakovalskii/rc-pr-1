@@ -83,9 +83,30 @@ def grab_checked(pipe, scale, a, filt):
     last_frame = time.time()
     return r
 
+viewers, busy = set(), set()
+
+async def serve_viewer(ws):                        # пульт подключился напрямую (--serve)
+    viewers.add(ws)
+    try: await ws.wait_closed()
+    finally: viewers.discard(ws)
+
+async def _send(ws, data):
+    busy.add(ws)
+    try: await ws.send(data)
+    except Exception: viewers.discard(ws)
+    finally: busy.discard(ws)
+
+def to_viewers(jpeg, stats):
+    for v in list(viewers):
+        if v in busy: continue                     # медленный зритель: кадр пропускаем, очередь не копим
+        asyncio.ensure_future(_send(v, jpeg)); asyncio.ensure_future(_send(v, stats))
+
 async def main(a):
     import websockets
     global last_frame
+    if a.serve:
+        await websockets.serve(serve_viewer, "0.0.0.0", a.serve, max_size=1 << 16)
+        print(f"отдаю кадры пультам напрямую на :{a.serve}")
     pipe, scale, usb = open_camera(a)
     last_frame = time.time()
     threading.Thread(target=watchdog, args=(a.watchdog,), daemon=True).start()
@@ -96,13 +117,16 @@ async def main(a):
             try: ws = await websockets.connect(a.url, max_size=8 << 20, proxy=None, open_timeout=5)
             except TypeError: ws = await websockets.connect(a.url, max_size=8 << 20, open_timeout=5)
             print(f"на связи с {a.url}")
+            if a.serve: await ws.send(json.dumps({"type": "depthsrc", "port": a.serve}))
             n, t0 = 0, time.time()
             while True:
                 jpeg, stats = await loop.run_in_executor(None, grab_checked, pipe, scale, a, filt)
                 n += 1
                 stats["fps"] = round(n / max(time.time() - t0, 1e-3), 1); stats["usb"] = usb
                 if time.time() - t0 > 5: n, t0 = 0, time.time()
-                await ws.send(jpeg); await ws.send(json.dumps(stats))
+                js = json.dumps(stats)
+                if a.serve: to_viewers(jpeg, js); await ws.send(js)       # через релей — только цифры
+                else: await ws.send(jpeg); await ws.send(js)
         except Exception as e:                     # сюда попадают только сбои связи: камера падает через os._exit
             print(f"релей недоступен ({e.__class__.__name__}: {e}), повтор через 2 с")
             await asyncio.sleep(2)
@@ -118,5 +142,6 @@ if __name__ == "__main__":
     p.add_argument("--quality", type=int, default=70)
     p.add_argument("--filters", action="store_true", help="сглаживание и заполнение дыр (дороже по CPU)")
     p.add_argument("--watchdog", type=float, default=5, help="с без кадров до перезапуска")
+    p.add_argument("--serve", type=int, default=0, help="порт: отдавать кадры пультам напрямую, релею — только адрес и цифры")
     p.add_argument("--reset", action="store_true", help="аппаратный сброс камеры при старте")
     asyncio.run(main(p.parse_args()))

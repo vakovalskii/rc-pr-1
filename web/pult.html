@@ -512,27 +512,37 @@ function setSplit(v){ splitOn = v; document.body.classList.toggle('split', v); $
 setSplit(splitOn);
 $('#depthBtn').addEventListener('click', () => setSplit(!splitOn));
 addEventListener('keydown', e => { if (e.code === 'KeyG' && e.target.tagName !== 'INPUT') setSplit(!splitOn); });
-let dws, dBusy = false, dLast = 0, dSeen = false;
+let dws, dDirect = null, dSrc = null, dBusy = false, dLast = 0, dSeen = false;
 function depthConnect(){
   dws = new WebSocket(`ws://${location.host}/ws/depthview`); dws.binaryType = 'arraybuffer';
   dws.onclose = () => setTimeout(depthConnect, 1500);
-  dws.onmessage = e => {
-    if (typeof e.data !== 'string') {
-      dLast = performance.now(); $('#dOff').style.display = 'none';
-      if (!dSeen) { dSeen = true; if (localStorage.getItem('split') === null) setSplit(true); }   // первый раз сами открываем окно
-      if (dBusy) return; dBusy = true;
-      const url = URL.createObjectURL(new Blob([e.data], {type: 'image/jpeg'})), img = $('#depthImg'), old = img.src;
-      img.onload = () => { dBusy = false; if (old.startsWith('blob:')) URL.revokeObjectURL(old); };
-      img.onerror = () => { dBusy = false; };
-      img.src = url; return;
-    }
-    const m = JSON.parse(e.data); if (m.type !== 'depth') return;
-    if (m.online === false) { $('#dOff').style.display = ''; return; }
-    const a = m.ahead, el = $('#dAhead');
-    el.textContent = a == null ? 'свободно' : a.toFixed(2) + ' м';
-    el.className = a == null ? '' : a < 0.5 ? 'near' : a < 1.0 ? 'mid' : '';
-    $('#dMeta').textContent = `центр ${m.center == null ? '—' : m.center.toFixed(2) + ' м'} · ${m.fps} к/с · USB ${m.usb}`;
-  };
+  dws.onmessage = depthMsg;
+}
+// Pi 4 сама отдаёт кадры (релей присылает адрес) — подключаемся к ней напрямую, мимо эфира Zero
+function depthDirect(){
+  if (!dSrc || dDirect) return;
+  dDirect = new WebSocket(dSrc); dDirect.binaryType = 'arraybuffer';
+  dDirect.onmessage = depthMsg;
+  dDirect.onclose = () => { dDirect = null; setTimeout(depthDirect, 1500); };
+}
+function depthMsg(e){
+  if (typeof e.data !== 'string') {
+    dLast = performance.now(); $('#dOff').style.display = 'none';
+    if (!dSeen) { dSeen = true; if (localStorage.getItem('split') === null) setSplit(true); }   // первый раз сами открываем окно
+    if (dBusy) return; dBusy = true;
+    const url = URL.createObjectURL(new Blob([e.data], {type: 'image/jpeg'})), img = $('#depthImg'), old = img.src;
+    img.onload = () => { dBusy = false; if (old.startsWith('blob:')) URL.revokeObjectURL(old); };
+    img.onerror = () => { dBusy = false; };
+    img.src = url; return;
+  }
+  const m = JSON.parse(e.data);
+  if (m.type === 'depthsrc') { if (m.url !== dSrc) { dSrc = m.url; if (dDirect) dDirect.close(); else depthDirect(); } return; }
+  if (m.type !== 'depth') return;
+  if (m.online === false) { $('#dOff').style.display = ''; return; }
+  const a = m.ahead, el = $('#dAhead');
+  el.textContent = a == null ? 'свободно' : a.toFixed(2) + ' м';
+  el.className = a == null ? '' : a < 0.5 ? 'near' : a < 1.0 ? 'mid' : '';
+  $('#dMeta').textContent = `центр ${m.center == null ? '—' : m.center.toFixed(2) + ' м'} · ${m.fps} к/с · USB ${m.usb}${dDirect && dDirect.readyState === 1 ? ' · напрямую' : ''}`;
 }
 depthConnect();
 setInterval(() => { if (performance.now() - dLast > 3000) $('#dOff').style.display = ''; }, 1000);

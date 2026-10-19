@@ -142,7 +142,10 @@ async def ws_pult(request):
     return ws
 
 # --- камера глубины (RealSense на отдельной малине): свой поток, пульт показывает вторым окном
+# Картинку Pi 4 может отдавать пультам сама (depth_cam.py --serve): тогда она шлёт сюда только
+# {"type":"depthsrc","port":N}, а релей подсказывает пультам прямой адрес — кадры не идут через эфир Zero дважды.
 depth_viewers, depth_busy = set(), set()
+depth_src = {"msg": None}
 
 async def _depth_send(ws, data, binary):
     depth_busy.add(ws)
@@ -158,11 +161,18 @@ async def ws_depth(request):                       # источник: depth_cam
         async for msg in ws:
             binary = msg.type == WSMsgType.BINARY
             if not binary and msg.type != WSMsgType.TEXT: continue
+            if not binary and '"depthsrc"' in msg.data:
+                port = json.loads(msg.data).get("port")
+                depth_src["msg"] = json.dumps({"type": "depthsrc", "url": f"ws://{request.remote}:{port}/"})
+                print("[depth] прямой поток:", depth_src["msg"])
+                for v in list(depth_viewers): asyncio.ensure_future(_depth_send(v, depth_src["msg"], False))
+                continue
             for v in list(depth_viewers):
                 if binary and v in depth_busy: continue     # медленный зритель: кадр пропускаем, очередь не копим
                 asyncio.ensure_future(_depth_send(v, msg.data, binary))
     finally:
         print("[depth] камера глубины отвалилась")
+        depth_src["msg"] = None
         for v in list(depth_viewers):
             asyncio.ensure_future(_depth_send(v, json.dumps({"type": "depth", "online": False}), False))
     return ws
@@ -171,6 +181,7 @@ async def ws_depthview(request):                   # зрители: пульт�
     ws = web.WebSocketResponse()
     await ws.prepare(request)
     depth_viewers.add(ws)
+    if depth_src["msg"]: await ws.send_str(depth_src["msg"])
     try:
         async for _ in ws: pass
     finally:

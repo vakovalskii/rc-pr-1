@@ -39,6 +39,15 @@
   #potbar{height:8px;background:#1c2230;border-radius:4px;position:relative;margin:4px 0}
   #potbar i{position:absolute;top:-2px;width:3px;height:12px;background:var(--acc)} #potbar u{position:absolute;top:0;width:2px;height:8px;background:#5b6472}
   #boardBtn{pointer-events:auto;cursor:pointer;user-select:none}
+  /* видимые джойстики: всегда на экране, показывают текущий газ/руль от любого источника */
+  .stick{position:fixed;bottom:calc(env(safe-area-inset-bottom) + 56px);width:150px;height:150px;border-radius:50%;
+    border:2px solid #2a3040;background:rgba(15,17,21,.45);pointer-events:none;z-index:1}
+  .stick::before,.stick::after{content:"";position:absolute;background:#2a3040}
+  .stick.v::before{left:50%;top:12px;bottom:12px;width:2px;margin-left:-1px}
+  .stick.h::before{top:50%;left:12px;right:12px;height:2px;margin-top:-1px}
+  .stick i{position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;border-radius:50%;
+    background:rgba(96,165,250,.35);border:2px solid var(--acc);transition:transform .03s linear}
+  #stT{left:calc(25% - 75px)} #stS{left:calc(75% - 75px)}
 </style>
 
 <img id="view" alt="">
@@ -53,6 +62,7 @@
   <div class="chip" id="ap" style="display:none"><span class="ok">АВТОПИЛОТ</span> — стрелки перехватят</div>
   <div class="chip" id="reset" title="в точку старта">↺ старт</div>
   <div class="chip" id="boardBtn">борт ▾</div>
+  <div class="chip" id="gp" style="display:none">🎮 <b id="gpName"></b></div>
 </div>
 <div id="board">
   <h4>руль (ESP8266)</h4>
@@ -69,9 +79,11 @@
   <h4>малина</h4><table id="tPi"></table>
 </div>
 <canvas id="mini" width="150" height="150"></canvas>
+<div class="stick v" id="stT"><i></i></div>
+<div class="stick h" id="stS"><i></i></div>
 <div id="pads">
-  <div class="pad" id="padT"><div class="knob"></div><div class="lbl">ГАЗ — тяни вверх/вниз<br><span class="kb">или ↑ ↓ / W S</span></div></div>
-  <div class="pad" id="padS"><div class="knob"></div><div class="lbl">РУЛЬ — тяни влево/вправо<br><span class="kb">или ← → / A D &nbsp; R — старт</span></div></div>
+  <div class="pad" id="padT"><div class="knob"></div><div class="lbl">ГАЗ — тяни мышью или пальцем вверх/вниз<br><span class="kb">или ↑ ↓ / W S, геймпад: левый стик или курки</span></div></div>
+  <div class="pad" id="padS"><div class="knob"></div><div class="lbl">РУЛЬ — тяни мышью или пальцем влево/вправо<br><span class="kb">или ← → / A D, геймпад: правый стик &nbsp; R — старт</span></div></div>
 </div>
 
 <script>
@@ -165,7 +177,7 @@ document.querySelectorAll('#board button[data-esp]').forEach(b => b.addEventList
 // команды шлём с фиксированным темпом, а не по каждому касанию:
 // так поток предсказуем, и failsafe на борту получает ровный пульс
 setInterval(() => {
-  kbTick();
+  kbTick(); gpTick();
   if (!ws || ws.readyState !== 1) return;
   const id = ++cmdId;
   pending.set(id, performance.now());
@@ -231,6 +243,32 @@ function kbTick(){
   if (Math.abs(steer) < 0.02) steer = 0;
   if (!held.size && !throttle && !steer) kbLive = false;
 }
+
+// --- геймпад (Xbox / PlayStation / любой с Gamepad API) -----------------
+// газ: правый курок вперёд, левый назад; если курки отпущены — левый стик по вертикали.
+// руль: правый стик по горизонтали (или левый, если правого нет). Мёртвая зона 8%.
+let gpLive = false;
+const dz = v => Math.abs(v) < 0.08 ? 0 : (v - Math.sign(v) * 0.08) / 0.92;
+addEventListener('gamepadconnected', e => { $('#gp').style.display = ''; $('#gpName').textContent = e.gamepad.id.split('(')[0].trim().slice(0, 24); });
+addEventListener('gamepaddisconnected', () => { $('#gp').style.display = 'none'; if (gpLive) { throttle = steer = 0; gpLive = false; } });
+function gpTick(){
+  const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
+  if (!pads.length) return;
+  const g = pads[0], ax = i => dz(g.axes[i] || 0), bt = i => (g.buttons[i] && g.buttons[i].value) || 0;
+  const trig = bt(7) - bt(6);
+  const t = Math.abs(trig) > 0.05 ? trig : -ax(1);
+  const s = g.axes.length > 2 ? ax(2) : ax(0);
+  if (t || s) { throttle = t; steer = s; gpLive = true; kbLive = false; }
+  else if (gpLive) { throttle = 0; steer = 0; gpLive = false; }   // отпустил — в ноль
+  if (g.buttons[3] && g.buttons[3].pressed) sendReset();          // Y / треугольник — на старт
+}
+
+// --- видимые джойстики: рисуем текущие газ и руль -------------------------
+(function draw(){
+  $('#stT i').style.transform = `translateY(${-throttle * 48}px)`;
+  $('#stS i').style.transform = `translateX(${steer * 48}px)`;
+  requestAnimationFrame(draw);
+})();
 
 // --- минимапа: карта из map_build.py, если релей её раздаёт --------------
 let mapMeta = null, mapImg = null, trail = [];

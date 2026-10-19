@@ -7,7 +7,7 @@ Requires=rc-relay.service
 User=pi
 WorkingDirectory=/home/pi/rc
 ExecStartPre=/bin/sleep 2
-ExecStart=/usr/bin/python3 -u pi_car.py --esp /dev/serial0 --rotate180 --url ws://127.0.0.1:8080/ws/car
+ExecStart=/usr/bin/python3 -u pi_car.py --esp /dev/serial0 --rotate180 --bitrate 6000000 --url ws://127.0.0.1:8080/ws/car
 Restart=always
 RestartSec=2
 

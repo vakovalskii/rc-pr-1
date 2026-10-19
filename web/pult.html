@@ -542,7 +542,7 @@ function depthMsg(e){
   const a = m.ahead, el = $('#dAhead');
   el.textContent = a == null ? 'свободно' : a.toFixed(2) + ' м';
   el.className = a == null ? '' : a < 0.5 ? 'near' : a < 1.0 ? 'mid' : '';
-  $('#dMeta').textContent = `центр ${m.center == null ? '—' : m.center.toFixed(2) + ' м'} · ${m.fps} к/с · USB ${m.usb}${dDirect && dDirect.readyState === 1 ? ' · напрямую' : ''}`;
+  $('#dMeta').textContent = `центр ${m.center == null ? '—' : m.center.toFixed(2) + ' м'} · ${m.fps} к/с · USB ${m.usb}${dDirect && dDirect.readyState === 1 ? ' · напрямую' : ''}${m.rec !== undefined ? ` · ● запись ${m.rec} кадров` : ''}`;
 }
 depthConnect();
 setInterval(() => { if (performance.now() - dLast > 3000) $('#dOff').style.display = ''; }, 1000);

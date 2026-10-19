@@ -10,12 +10,16 @@
 
 pyrealsense2 под Python 3.13 (trixie) колёс нет — запускается из venv на Python 3.12 (uv).
 
+Запись для SLAM (--color): пока существует файл ~/rc/rec.on, кадры глубины, выровненные
+по цветной камере, и сами цветные кадры пишутся в ~/rec/<время>/{depth/*.png, color/*.jpg}
+плюс intrinsics.json и frames.csv. Дальше — slam.py на машине с GPU.
+
 Надёжность: камера на USB может пропасть и вернуться под новым номером — старый
 pipeline тогда мёртв навсегда. Поэтому любой сбой камеры или 5 с без кадров =
 выход с кодом ошибки, а systemd (rc-depth.service) перезапускает процесс без
 ограничения попыток. При старте ждём камеру и делаем ей аппаратный сброс.
 """
-import argparse, asyncio, io, json, os, threading, time
+import argparse, asyncio, io, json, os, pathlib, queue, threading, time
 import numpy as np
 import pyrealsense2 as rs
 from PIL import Image
@@ -35,6 +39,7 @@ def open_camera(a):
         print("аппаратный сброс камеры…"); dev.hardware_reset(); time.sleep(3); wait_camera()
     pipe, cfg = rs.pipeline(), rs.config()
     cfg.enable_stream(rs.stream.depth, a.width, a.height, rs.format.z16, a.fps)
+    if a.color: cfg.enable_stream(rs.stream.color, a.width, a.height, rs.format.rgb8, a.fps)
     prof = pipe.start(cfg)
     dev = prof.get_device()
     scale = dev.first_depth_sensor().get_depth_scale()
@@ -50,8 +55,47 @@ def colorize(z, near, far):
     rgb[z <= 0] = (12, 14, 18)
     return rgb
 
+REC_FLAG = pathlib.Path.home() / "rc" / "rec.on"
+
+class Recorder:
+    """Пишет пары (глубина по цветной камере, цвет) в отдельном потоке; не успевает диск — кадр пропускаем."""
+    def __init__(self):
+        self.dir, self.n, self.dropped, self.q = None, 0, 0, queue.Queue(maxsize=30)
+        self.align = rs.align(rs.stream.color)
+        threading.Thread(target=self._writer, daemon=True).start()
+
+    def feed(self, fs, scale):
+        on = REC_FLAG.exists()
+        if not on:
+            if self.dir: print(f"запись остановлена: {self.dir}, {self.n} кадров, пропущено {self.dropped}"); self.dir = None
+            return
+        al = self.align.process(fs)
+        d, c = al.get_depth_frame(), al.get_color_frame()
+        if not d or not c: return
+        if not self.dir:
+            self.dir = pathlib.Path.home() / "rec" / time.strftime("%Y%m%d-%H%M%S")
+            (self.dir / "depth").mkdir(parents=True); (self.dir / "color").mkdir()
+            i = c.profile.as_video_stream_profile().intrinsics
+            (self.dir / "intrinsics.json").write_text(json.dumps({"width": i.width, "height": i.height, "fx": i.fx, "fy": i.fy,
+                                                                  "cx": i.ppx, "cy": i.ppy, "depth_scale": scale}))
+            self.n = self.dropped = 0; print(f"запись: {self.dir}")
+        try:
+            self.q.put_nowait((self.dir, self.n, c.get_timestamp(), np.asanyarray(d.get_data()).copy(), np.asanyarray(c.get_data()).copy()))
+            self.n += 1
+        except queue.Full: self.dropped += 1
+
+    def _writer(self):
+        while True:
+            dr, i, ts, z, rgb = self.q.get()
+            Image.fromarray(z).save(dr / "depth" / f"{i:06d}.png", compress_level=1)
+            Image.fromarray(rgb).save(dr / "color" / f"{i:06d}.jpg", quality=92)
+            with open(dr / "frames.csv", "a") as f: f.write(f"{i},{ts:.1f}\n")
+
+rec = None
+
 def grab(pipe, scale, a, filt):
     fs = pipe.wait_for_frames(2000)
+    if rec: rec.feed(fs, scale)
     d = fs.get_depth_frame()
     for f in filt: d = f.process(d)
     z = np.asanyarray(d.get_data()).astype(np.float32) * scale
@@ -61,7 +105,8 @@ def grab(pipe, scale, a, filt):
     stats = {"type": "depth", "online": True,
              "center": round(float(np.median(c)), 2) if c.size else None,
              "ahead": round(float(np.percentile(band, 3)), 2) if band.size > 50 else None,   # 3-й перцентиль: шум не считаем препятствием
-             "valid": round(float((z > 0).mean()), 2), "w": w, "h": h}
+             "valid": round(float((z > 0).mean()), 2), "w": w, "h": h,
+             **({"rec": rec.n, "rec_drop": rec.dropped} if rec and rec.dir else {})}
     buf = io.BytesIO(); Image.fromarray(colorize(z, a.near, a.far)).save(buf, "JPEG", quality=a.quality)
     return buf.getvalue(), stats
 
@@ -107,7 +152,9 @@ async def main(a):
     if a.serve:
         await websockets.serve(serve_viewer, "0.0.0.0", a.serve, max_size=1 << 16)
         print(f"отдаю кадры пультам напрямую на :{a.serve}")
+    global rec
     pipe, scale, usb = open_camera(a)
+    if a.color: rec = Recorder()
     last_frame = time.time()
     threading.Thread(target=watchdog, args=(a.watchdog,), daemon=True).start()
     filt = [rs.spatial_filter(), rs.temporal_filter(), rs.hole_filling_filter(1)] if a.filters else []
@@ -143,5 +190,6 @@ if __name__ == "__main__":
     p.add_argument("--filters", action="store_true", help="сглаживание и заполнение дыр (дороже по CPU)")
     p.add_argument("--watchdog", type=float, default=5, help="с без кадров до перезапуска")
     p.add_argument("--serve", type=int, default=0, help="порт: отдавать кадры пультам напрямую, релею — только адрес и цифры")
+    p.add_argument("--color", action="store_true", help="включить цветную камеру и запись для SLAM по флагу ~/rc/rec.on")
     p.add_argument("--reset", action="store_true", help="аппаратный сброс камеры при старте")
     asyncio.run(main(p.parse_args()))

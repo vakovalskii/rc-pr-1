@@ -1,280 +1,407 @@
 <!doctype html>
+<html lang="ru">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>RC Buggy</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0d0f12">
+<title>RC Buggy — пульт</title>
 <style>
-  :root{--bg:#0f1115;--fg:#e8e9ed;--dim:#8b93a1;--ok:#4ade80;--bad:#f87171;--acc:#60a5fa}
+  :root{
+    --bg:#0d0f12; --panel:#15181d; --panel-2:#1c2027; --line:#2a2f38;
+    --fg:#eceae6; --dim:#9a9890; --faint:#6b6a64;
+    --amber:#ffad33; --amber-ink:#1a1206; --ok:#5fd38a; --bad:#ff6257; --warn:#ffd166;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+    --ease:cubic-bezier(.22,1,.36,1);
+  }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html{-webkit-text-size-adjust:100%}
   html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
-    font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;touch-action:none;overscroll-behavior:none}
-  #view{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
-  #hud{position:fixed;z-index:2;top:calc(env(safe-area-inset-top) + 8px);left:8px;right:8px;
-    display:flex;gap:6px;flex-wrap:wrap;pointer-events:none}
-  .chip{background:rgba(15,17,21,.82);border:1px solid #2a3040;border-radius:6px;padding:4px 8px;white-space:nowrap}
-  .chip b{color:var(--acc);font-weight:600}
-  .bad{color:var(--bad)} .ok{color:var(--ok)}
-  #pads{position:fixed;inset:0;display:flex}
-  .pad{flex:1;position:relative}
-  .knob{position:absolute;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:50%;
-    border:2px solid var(--acc);background:rgba(96,165,250,.16);opacity:0;transition:opacity .12s}
-  .pad.live .knob{opacity:1}
-  .lbl{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 10px);width:100%;
-    text-align:center;color:var(--dim);pointer-events:none}
-  #mini{position:fixed;right:8px;bottom:calc(env(safe-area-inset-bottom) + 8px);width:150px;height:150px;
-    border:1px solid #2a3040;border-radius:8px;background:rgba(15,17,21,.85);display:none;pointer-events:none;z-index:2}
-  #reset{pointer-events:auto;cursor:pointer;user-select:none}
-  #reset:active{background:#2a3040}
-  .kb{display:none;color:#5b6472} @media (hover:hover){.kb{display:inline}}
-  .hit{animation:hit .4s}
-  @keyframes hit{0%{background:#7f1d1d}100%{background:rgba(15,17,21,.82)}}
-  #board{position:fixed;right:8px;top:calc(env(safe-area-inset-top) + 44px);width:310px;max-height:calc(100% - 120px);overflow:auto;
-    background:rgba(15,17,21,.9);border:1px solid #2a3040;border-radius:8px;padding:8px 10px;z-index:3;display:none}
-  #board.open{display:block}
-  #board table{width:100%;border-collapse:collapse} #board td{padding:1px 0;vertical-align:top}
-  #board td:first-child{color:var(--dim);padding-right:8px} #board td:last-child{text-align:right}
-  #board h4{margin:8px 0 4px;color:var(--acc);font-size:12px;font-weight:600}
-  #board .btns{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
-  #board button{font:inherit;color:var(--fg);background:#1c2230;border:1px solid #2a3040;border-radius:5px;padding:3px 7px;cursor:pointer}
-  #board button.on{border-color:var(--acc);color:var(--acc)}
-  #potbar{height:8px;background:#1c2230;border-radius:4px;position:relative;margin:4px 0}
-  #potbar i{position:absolute;top:-2px;width:3px;height:12px;background:var(--acc)} #potbar u{position:absolute;top:0;width:2px;height:8px;background:#5b6472}
-  #boardBtn{pointer-events:auto;cursor:pointer;user-select:none}
-  /* видимые джойстики: всегда на экране, показывают текущий газ/руль от любого источника */
-  .stick{position:fixed;bottom:calc(env(safe-area-inset-bottom) + 56px);width:150px;height:150px;border-radius:50%;
-    border:2px solid #2a3040;background:rgba(15,17,21,.45);pointer-events:none;z-index:1}
-  .stick::before,.stick::after{content:"";position:absolute;background:#2a3040}
-  .stick.v::before{left:50%;top:12px;bottom:12px;width:2px;margin-left:-1px}
-  .stick.h::before{top:50%;left:12px;right:12px;height:2px;margin-top:-1px}
-  .stick i{position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;border-radius:50%;
-    background:rgba(96,165,250,.35);border:2px solid var(--acc);transition:transform .03s linear}
-  #stT{left:calc(25% - 75px)} #stS{left:calc(75% - 75px)}
-</style>
+    font:15px/1.5 var(--sans);overscroll-behavior:none;touch-action:none;user-select:none;-webkit-user-select:none}
+  button,input,select{font:inherit;color:inherit}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
 
+  /* видео */
+  #view{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;background:#07080a}
+  #novideo{position:fixed;inset:0;display:grid;place-items:center;color:var(--faint);font-size:14px;pointer-events:none}
+  #novideo.hide{display:none}
+
+  /* верхняя панель */
+  #top{position:fixed;z-index:20;top:0;left:0;right:0;display:flex;align-items:center;gap:10px;
+    padding:calc(env(safe-area-inset-top) + 10px) calc(env(safe-area-inset-right) + 12px) 10px calc(env(safe-area-inset-left) + 12px);
+    background:linear-gradient(#0d0f12e6,#0d0f1200);pointer-events:none}
+  .pill{display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;border-radius:8px;
+    background:#15181dd9;border:1px solid var(--line);white-space:nowrap;font-size:13px}
+  .pill b{font-weight:600}
+  .pill .k{color:var(--dim)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--bad)}
+  .dot.on{background:var(--ok)}
+  #state{font-weight:700;letter-spacing:.06em;font-size:13px;text-transform:uppercase}
+  #state.ok{color:var(--ok)} #state.fs{color:var(--amber-ink);background:var(--bad);border-color:var(--bad)}
+  .grow{flex:1}
+  .btn{pointer-events:auto;cursor:pointer;height:34px;min-width:44px;padding:0 14px;border-radius:8px;border:1px solid var(--line);
+    background:#15181dd9;touch-action:manipulation;transition:background .15s var(--ease)}
+  .btn:hover{background:var(--panel-2)} .btn:active{transform:translateY(1px)}
+  .btn.on{background:var(--amber);border-color:var(--amber);color:var(--amber-ink);font-weight:600}
+  #apPill{display:none;color:var(--amber)}
+  @media (max-width:1000px){ .wide{display:none} }
+  @media (max-width:560px){ #top .btn{padding:0 10px} }
+
+  /* джойстики */
+  #pads{position:fixed;inset:0;display:flex;z-index:5}
+  .pad{flex:1;position:relative;cursor:grab}
+  .pad:active{cursor:grabbing}
+  .stick{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 34px);width:168px;height:168px;margin-left:-84px;
+    border-radius:50%;background:#0d0f1299;border:1px solid #ffffff1f;pointer-events:none}
+  #padT .stick{left:22%} #padS .stick{left:78%}
+  .stick .axis{position:absolute;background:#ffffff1a}
+  #padT .axis{left:50%;top:16px;bottom:16px;width:2px;margin-left:-1px}
+  #padS .axis{top:50%;left:16px;right:16px;height:2px;margin-top:-1px}
+  .knob{position:absolute;left:50%;top:50%;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;
+    background:#ffad3326;border:2px solid var(--amber);will-change:transform}
+  .readout{position:absolute;left:0;right:0;top:-30px;text-align:center;font-size:13px;color:var(--dim)}
+  .readout b{color:var(--fg);font-size:15px}
+  .hint{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 8px);text-align:center;font-size:12px;color:#c9c6bd;text-shadow:0 1px 3px #000}
+  .kbd{display:none} @media (hover:hover){ .kbd{display:inline} }
+
+  /* выдвижные панели */
+  .drawer{position:fixed;z-index:30;top:0;bottom:0;width:min(380px,92vw);background:var(--panel);
+    border-left:1px solid var(--line);overflow:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;
+    padding:calc(env(safe-area-inset-top) + 16px) calc(env(safe-area-inset-right) + 18px) calc(env(safe-area-inset-bottom) + 24px) 18px;
+    transform:translateX(105%);transition:transform .28s var(--ease);user-select:text}
+  .drawer{right:0}
+  .drawer.open{transform:none}
+  .drawer header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .drawer h2{margin:0;font-size:20px;letter-spacing:-.01em}
+  .drawer h3{margin:22px 0 6px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--amber);font-weight:700}
+  .drawer p.note{margin:4px 0 0;font-size:13px;color:var(--dim);line-height:1.45}
+  .row{display:grid;grid-template-columns:1fr auto;align-items:center;gap:2px 12px;padding:10px 0;border-bottom:1px solid #ffffff0d}
+  .row label{font-size:14px}
+  .row output{font-family:var(--mono);font-size:14px;color:var(--fg);min-width:64px;text-align:right}
+  .row small{grid-column:1/-1;color:var(--faint);font-size:12px;line-height:1.4}
+  input[type=range]{grid-column:1/-1;width:100%;height:32px;margin:0;background:none;-webkit-appearance:none;appearance:none;touch-action:pan-x}
+  input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:var(--line)}
+  input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:var(--line)}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;margin-top:-9px;border-radius:50%;background:var(--amber);border:3px solid var(--panel)}
+  input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:var(--amber);border:3px solid var(--panel)}
+  .seg{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .seg .btn{flex:1;height:40px;background:var(--panel-2)}
+  .seg .btn.on{background:var(--amber)}
+  dl.tele{display:grid;grid-template-columns:1fr auto;gap:6px 14px;margin:6px 0 0;font-size:14px}
+  dl.tele dt{color:var(--dim)} dl.tele dd{margin:0;text-align:right;font-family:var(--mono)}
+  .good{color:var(--ok)} .badc{color:var(--bad)} .warnc{color:var(--warn)}
+  .potbar{position:relative;height:28px;margin:8px 0 2px;border-radius:6px;background:var(--panel-2)}
+  .potbar .cal{position:absolute;top:4px;bottom:4px;width:2px;background:var(--faint)}
+  .potbar .cal::after{content:attr(data-l);position:absolute;top:-1px;left:5px;font-size:10px;color:var(--faint)}
+  .potbar .cur{position:absolute;top:0;bottom:0;width:4px;margin-left:-2px;border-radius:2px;background:var(--amber);transition:left .08s linear}
+  #scrim{position:fixed;inset:0;z-index:25;background:#0008;opacity:0;pointer-events:none;transition:opacity .2s var(--ease)}
+  #scrim.on{opacity:1;pointer-events:auto}
+
+  #mini{position:fixed;z-index:6;right:calc(env(safe-area-inset-right) + 12px);top:calc(env(safe-area-inset-top) + 58px);
+    width:150px;height:150px;border:1px solid var(--line);border-radius:8px;background:#15181dd9;display:none;pointer-events:none}
+  .hit{animation:hit .4s} @keyframes hit{from{background:#7f1d1d}to{background:#15181dd9}}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
 <img id="view" alt="">
-<div id="hud">
-  <div class="chip">link <b id="link">…</b></div>
-  <div class="chip">RTT <b id="rtt">—</b> мс</div>
-  <div class="chip">fps <b id="fps">—</b></div>
-  <div class="chip">кадр <b id="kb">—</b> КБ</div>
-  <div class="chip">поток <b id="bw">—</b> кбит/с</div>
-  <div class="chip" id="fs"></div>
-  <div class="chip" id="pos" style="display:none">x <b id="px">0</b> y <b id="py">0</b> удары <b id="hits">0</b></div>
-  <div class="chip" id="ap" style="display:none"><span class="ok">АВТОПИЛОТ</span> — стрелки перехватят</div>
-  <div class="chip" id="reset" title="в точку старта">↺ старт</div>
-  <div class="chip" id="boardBtn">борт ▾</div>
-  <div class="chip" id="gp" style="display:none">🎮 <b id="gpName"></b></div>
+<div id="novideo">ждём видео с машинки…</div>
+
+<div id="top">
+  <div class="pill"><span class="dot" id="dot"></span><b id="link">нет связи</b></div>
+  <div class="pill" id="state">—</div>
+  <div class="pill wide"><span class="k">отклик</span><b class="num" id="rtt">—</b><span class="k">мс</span></div>
+  <div class="pill wide"><span class="k">видео</span><b class="num" id="fps">—</b><span class="k">к/с</span><b class="num" id="bw">—</b><span class="k">Мбит/с</span></div>
+  <div class="pill wide" id="wifiPill" style="display:none"><span class="k">Wi-Fi</span><b class="num" id="wifi">—</b><span class="k">дБм</span></div>
+  <div class="pill" id="apPill">автопилот ведёт</div>
+  <div class="pill" id="pos" style="display:none"><span class="k">x</span><b class="num" id="px">0</b><span class="k">y</span><b class="num" id="py">0</b><span class="k">удары</span><b class="num" id="hits">0</b></div>
+  <span class="grow"></span>
+  <button class="btn" id="gpBtn" style="display:none" title="геймпад подключён">геймпад</button>
+  <button class="btn" id="resetBtn" style="display:none" title="на старт (R)">↺ старт</button>
+  <button class="btn" data-open="tele">телеметрия</button>
+  <button class="btn" data-open="set">настройки</button>
 </div>
-<div id="board">
-  <h4>руль (ESP8266)</h4>
-  <div id="potbar"><u id="pl"></u><u id="pc"></u><u id="pr"></u><i id="pk"></i></div>
-  <table id="tSteer"></table>
-  <div class="btns">
-    <button data-esp="mode,0">выкл</button><button data-esp="mode,1">ручной</button><button data-esp="mode,2">по потенциометру</button>
-  </div>
-  <div class="btns">
-    <button data-esp="cal,l">калибр. лево</button><button data-esp="cal,c">центр</button><button data-esp="cal,r">право</button><button data-esp="inv">инверт</button>
-  </div>
-  <h4>ход</h4><table id="tDrive"></table>
-  <h4>связь</h4><table id="tLink"></table>
-  <h4>малина</h4><table id="tPi"></table>
-</div>
+
 <canvas id="mini" width="150" height="150"></canvas>
-<div class="stick v" id="stT"><i></i></div>
-<div class="stick h" id="stS"><i></i></div>
+
 <div id="pads">
-  <div class="pad" id="padT"><div class="knob"></div><div class="lbl">ГАЗ — тяни мышью или пальцем вверх/вниз<br><span class="kb">или ↑ ↓ / W S, геймпад: левый стик или курки</span></div></div>
-  <div class="pad" id="padS"><div class="knob"></div><div class="lbl">РУЛЬ — тяни мышью или пальцем влево/вправо<br><span class="kb">или ← → / A D, геймпад: правый стик &nbsp; R — старт</span></div></div>
+  <div class="pad" id="padT">
+    <div class="stick"><div class="readout">газ <b class="num" id="tVal">0%</b></div><div class="axis"></div><div class="knob"></div></div>
+    <div class="hint">газ: тяни вверх и вниз <span class="kbd">· W S или ↑ ↓</span></div>
+  </div>
+  <div class="pad" id="padS">
+    <div class="stick"><div class="readout">руль <b class="num" id="sVal">0%</b></div><div class="axis"></div><div class="knob"></div></div>
+    <div class="hint">руль: тяни влево и вправо <span class="kbd">· A D или ← →</span></div>
+  </div>
 </div>
+
+<div id="scrim"></div>
+
+<aside class="drawer" id="set" aria-label="Настройки">
+  <header><h2>Настройки</h2><button class="btn" data-close>готово</button></header>
+
+  <h3>Газ</h3>
+  <div class="row"><label for="maxThr">Максимум газа</label><output id="maxThrV"></output>
+    <input type="range" id="maxThr" min="0" max="1000" step="50" data-esp="max">
+    <small>Потолок на самой машинке. Начинай с 30–40%.</small></div>
+  <div class="row"><label for="acc">Разгон</label><output id="accV"></output>
+    <input type="range" id="acc" min="100" max="3000" step="100" data-esp="acc">
+    <small>Время от нуля до полного газа. Меньше — резче.</small></div>
+  <div class="row"><label for="brk">Торможение</label><output id="brkV"></output>
+    <input type="range" id="brk" min="100" max="4000" step="100" data-esp="brk">
+    <small>Время от полного газа до остановки. Меньше — резче.</small></div>
+  <div class="row"><label for="thrExpo">Мягкость у нуля</label><output id="thrExpoV"></output>
+    <input type="range" id="thrExpo" min="0" max="100" step="5" data-local>
+    <small>Экспонента: чем больше, тем точнее малый газ, полный ход стика остаётся полным.</small></div>
+
+  <h3>Руль</h3>
+  <div class="row"><label for="pwm">Сила и скорость руля</label><output id="pwmV"></output>
+    <input type="range" id="pwm" min="200" max="1000" step="50" data-esp="pwm">
+    <small>Мощность моторчика руля. Больше — быстрее поворот, но сильнее греется.</small></div>
+  <div class="row"><label for="steerExpo">Мягкость у центра</label><output id="steerExpoV"></output>
+    <input type="range" id="steerExpo" min="0" max="100" step="5" data-local>
+    <small>Чем больше, тем спокойнее машинка на прямой.</small></div>
+  <div class="row"><label for="kp">Жёсткость удержания</label><output id="kpV"></output>
+    <input type="range" id="kp" min="1" max="20" step="1" data-esp="kp">
+    <small>Только в режиме «по потенциометру». Больше — точнее, но может дрожать.</small></div>
+  <div class="row"><label>Режим руля</label><output id="modeV"></output>
+    <div class="seg" style="grid-column:1/-1">
+      <button class="btn" data-cmd="mode,0">выкл</button><button class="btn" data-cmd="mode,1">ручной</button><button class="btn" data-cmd="mode,2">по датчику</button>
+    </div>
+    <small>Ручной: стик крутит моторчик. По датчику: стик задаёт угол, колёса держат его сами по потенциометру (нужна калибровка).</small></div>
+  <div class="row" style="grid-template-columns:1fr"><label>Калибровка</label>
+    <div class="potbar"><span class="cal" id="cL" data-l="Л"></span><span class="cal" id="cC" data-l="Ц"></span><span class="cal" id="cR" data-l="П"></span><span class="cur" id="cCur"></span></div>
+    <div class="seg"><button class="btn" data-cmd="cal,l">лево</button><button class="btn" data-cmd="cal,c">центр</button><button class="btn" data-cmd="cal,r">право</button><button class="btn" data-cmd="inv">инверт</button></div>
+    <small>Выведи колёса в положение и нажми кнопку. «Инверт» — если руль крутит в обратную сторону.</small></div>
+
+  <h3>Клавиатура и геймпад</h3>
+  <div class="row"><label for="kbThr">Газ с клавиатуры</label><output id="kbThrV"></output>
+    <input type="range" id="kbThr" min="10" max="100" step="5" data-local>
+    <small>Сколько газа даёт W.</small></div>
+  <div class="row"><label for="kbRate">Резкость клавиш</label><output id="kbRateV"></output>
+    <input type="range" id="kbRate" min="5" max="100" step="5" data-local>
+    <small>Как быстро газ и руль доходят до цели при нажатии клавиши.</small></div>
+  <p class="note">Геймпад: правый курок — вперёд, левый — назад (или левый стик), руль — правый стик, Y / △ — на старт.</p>
+</aside>
+
+<aside class="drawer" id="tele" aria-label="Телеметрия">
+  <header><h2>Телеметрия</h2><button class="btn" data-close>закрыть</button></header>
+  <h3>Руль</h3><dl class="tele" id="tSteer"></dl>
+  <h3>Ход</h3><dl class="tele" id="tDrive"></dl>
+  <h3>Связь</h3><dl class="tele" id="tLink"></dl>
+  <h3>Борт</h3><dl class="tele" id="tPi"></dl>
+</aside>
 
 <script>
-const $ = s => document.querySelector(s);
-let ws, steer = 0, throttle = 0, cmdId = 0;
-const pending = new Map();               // id -> t0, для замера RTT петли
-let rttEMA = null, frames = 0, bytes = 0, lastTick = performance.now();
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+let ws, steer = 0, throttle = 0, cmdId = 0, last = {};
+const pending = new Map();
+let rttEMA = null, frames = 0, bytes = 0, lastTick = performance.now(), lastFrameAt = 0;
 
+// ---------- локальные настройки (в браузере) ----------
+const LOCAL = {thrExpo: 30, steerExpo: 20, kbThr: 50, kbRate: 35};
+const store = (() => { try { return JSON.parse(localStorage.getItem('pult') || '{}'); } catch { return {}; } })();
+const cfg = {...LOCAL, ...store};
+const saveLocal = () => { try { localStorage.setItem('pult', JSON.stringify(cfg)); } catch {} };
+const expo = (x, e) => (1 - e) * x + e * x * x * x;   // RC-экспонента: мягко у нуля, полный ход у края
+
+// ---------- связь ----------
 function connect(){
   ws = new WebSocket(`ws://${location.host}/ws/pult`);
   ws.binaryType = 'arraybuffer';
-  ws.onopen  = () => { $('#link').textContent = 'ok'; $('#link').className = 'ok'; };
-  ws.onclose = () => { $('#link').textContent = 'нет'; $('#link').className = 'bad';
-                       setTimeout(connect, 800); };
+  ws.onopen = () => { $('#dot').classList.add('on'); $('#link').textContent = 'на связи'; };
+  ws.onclose = () => { $('#dot').classList.remove('on'); $('#link').textContent = 'нет связи';
+                       setState(null); setTimeout(connect, 800); };
   ws.onmessage = e => {
-    if (typeof e.data === 'string') {
-      const m = JSON.parse(e.data);
-      if (m.type === 'pilot') { $('#ap').style.display = m.online ? '' : 'none'; return; }
-      if (m.type === 'tele') {
-        const t0 = pending.get(m.ack);
-        if (t0 !== undefined) {                       // команда вернулась — вот петля
-          const rtt = performance.now() - t0;
-          rttEMA = rttEMA === null ? rtt : rttEMA * 0.8 + rtt * 0.2;
-          $('#rtt').textContent = Math.round(rttEMA);
-          pending.clear();
-        }
-        $('#fs').innerHTML = m.failsafe
-          ? '<span class="bad">FAILSAFE</span>'
-          : `<span class="ok">${m.speed !== undefined ? 'v ' + m.speed : 'едем'}</span>`;
-        board(m);
-        if (m.x !== undefined) {                       // машинка в полигоне — есть карта
-          $('#pos').style.display = '';
-          $('#px').textContent = m.x.toFixed(2); $('#py').textContent = m.y.toFixed(2);
-          $('#hits').textContent = m.collisions ?? 0;
-          if (m.collision && !$('#pos').classList.contains('hit')) {
-            $('#pos').classList.add('hit'); setTimeout(() => $('#pos').classList.remove('hit'), 400);
-          }
-          drawMini(m);
-        }
-      }
-    } else {
-      frames++; bytes += e.data.byteLength;
-      $('#kb').textContent = (e.data.byteLength / 1024).toFixed(1);
-      const url = URL.createObjectURL(new Blob([e.data], {type:'image/jpeg'}));
-      const old = $('#view').src;
-      $('#view').src = url;
+    if (typeof e.data !== 'string') {
+      frames++; bytes += e.data.byteLength; lastFrameAt = performance.now();
+      const url = URL.createObjectURL(new Blob([e.data], {type: 'image/jpeg'}));
+      const old = $('#view').src; $('#view').src = url;
       if (old.startsWith('blob:')) URL.revokeObjectURL(old);
+      $('#novideo').classList.add('hide');
+      return;
+    }
+    const m = JSON.parse(e.data);
+    if (m.type === 'pilot') { $('#apPill').style.display = m.online ? 'flex' : 'none'; return; }
+    if (m.type !== 'tele') return;
+    const t0 = pending.get(m.ack);
+    if (t0 !== undefined) {
+      const r = performance.now() - t0; rttEMA = rttEMA === null ? r : rttEMA * .8 + r * .2;
+      $('#rtt').textContent = Math.round(rttEMA); pending.clear();
+    }
+    last = m; setState(m); syncEsp(m); renderTele(m);
+    if (m.wifi_dbm !== undefined) { $('#wifiPill').style.display = 'flex'; $('#wifi').textContent = m.wifi_dbm; }
+    if (m.x !== undefined) {
+      $('#pos').style.display = 'flex'; $('#resetBtn').style.display = '';
+      $('#px').textContent = m.x.toFixed(2); $('#py').textContent = m.y.toFixed(2); $('#hits').textContent = m.collisions ?? 0;
+      if (m.collision && !$('#pos').classList.contains('hit')) { $('#pos').classList.add('hit'); setTimeout(() => $('#pos').classList.remove('hit'), 400); }
+      drawMini(m);
     }
   };
 }
+function setState(m){
+  const el = $('#state');
+  if (!m) { el.textContent = '—'; el.className = 'pill'; return; }
+  const fs = m.failsafe || m.esp_failsafe;
+  el.textContent = fs ? 'failsafe' : (m.speed !== undefined ? `едем ${m.speed}` : 'готов');
+  el.className = 'pill ' + (fs ? 'fs' : 'ok');
+}
 connect();
+const sendJSON = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+const espCmd = c => sendJSON({type: 'esp', cmd: c});
 
-// --- панель «борт»: всё, что шлёт машинка ---------------------------------
-const MODES = ['выкл', 'ручной', 'по потенциометру'];
-const yes = v => v ? '<span class="bad">да</span>' : '<span class="ok">нет</span>';
-function rows(id, list){
-  $(id).innerHTML = list.filter(r => r[1] !== undefined && r[1] !== null)
-    .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
-}
-function board(m){
-  if (!$('#board').classList.contains('open')) return;
-  if (m.pot !== undefined) {
-    const x = v => (Math.max(0, Math.min(1023, v)) / 1023 * 100) + '%';
-    $('#pk').style.left = x(m.pot);
-    for (const [el, v] of [['#pl', m.potL], ['#pc', m.potC], ['#pr', m.potR]]) {
-      $(el).style.display = v >= 0 ? '' : 'none'; if (v >= 0) $(el).style.left = x(v);
-    }
-  }
-  document.querySelectorAll('#board button[data-esp^="mode,"]').forEach(b =>
-    b.classList.toggle('on', b.dataset.esp === 'mode,' + m.steer_mode));
-  const cal = v => v >= 0 ? v : '—';
-  rows('#tSteer', [['потенциометр A0', m.pot], ['калибровка Л / Ц / П', m.pot !== undefined ? `${cal(m.potL)} / ${cal(m.potC)} / ${cal(m.potR)}` : undefined],
-    ['режим', MODES[m.steer_mode]], ['ШИМ моторчика', m.steer_pwm], ['инверсия', m.inv === undefined ? undefined : (m.inv ? 'да' : 'нет')],
-    ['команда руля', m.steer]]);
-  rows('#tDrive', [['газ (команда)', m.thr], ['регулятор, мкс', m.esc_us], ['потолок газа ESP', m.max_thr !== undefined ? Math.round(m.max_thr / 10) + '%' : undefined],
-    ['разгон / торможение', m.acc_ms !== undefined ? `${m.acc_ms} / ${m.brk_ms} мс` : undefined]]);
-  rows('#tLink', [['failsafe малины', m.failsafe === undefined ? undefined : yes(m.failsafe)], ['failsafe ESP', m.esp_failsafe === undefined ? undefined : yes(m.esp_failsafe)],
-    ['последний ответ ESP', m.esp_age_ms !== undefined ? (m.esp_age_ms === null ? '<span class="bad">нет связи</span>' : m.esp_age_ms + ' мс') : undefined],
-    ['команды ESP от', m.esp_src], ['Wi-Fi малины', m.wifi_dbm !== undefined ? m.wifi_dbm + ' дБм' : undefined]]);
-  rows('#tPi', [['камера', m.cam], ['температура', m.temp !== undefined ? m.temp + ' °C' : undefined],
-    ['нагрузка CPU', m.cpu_load], ['свободно ОЗУ', m.mem_free_mb !== undefined ? m.mem_free_mb + ' МБ' : undefined],
-    ['недовольтаж сейчас', m.undervolt === undefined ? undefined : yes(m.undervolt)], ['недовольтаж был', m.undervolt_seen === undefined ? undefined : yes(m.undervolt_seen)],
-    ['троттлинг', m.throttled === undefined ? undefined : yes(m.throttled)], ['аптайм', m.uptime_s !== undefined ? Math.floor(m.uptime_s / 60) + ' мин' : undefined]]);
-}
-$('#boardBtn').addEventListener('pointerdown', e => { e.stopPropagation(); $('#board').classList.toggle('open'); });
-$('#board').addEventListener('pointerdown', e => e.stopPropagation());
-document.querySelectorAll('#board button[data-esp]').forEach(b => b.addEventListener('click', () => {
-  if (ws && ws.readyState === 1) ws.send(JSON.stringify({type: 'esp', cmd: b.dataset.esp}));
-}));
-
-// команды шлём с фиксированным темпом, а не по каждому касанию:
-// так поток предсказуем, и failsafe на борту получает ровный пульс
+// 20 Гц ровный пульс команд: failsafe на борту получает предсказуемый поток
 setInterval(() => {
   kbTick(); gpTick();
   if (!ws || ws.readyState !== 1) return;
-  const id = ++cmdId;
-  pending.set(id, performance.now());
-  if (pending.size > 40) pending.clear();
-  ws.send(JSON.stringify({type:'cmd', id, steer:+steer.toFixed(3), throttle:+throttle.toFixed(3)}));
-}, 50);                                   // 20 Гц
+  const id = ++cmdId; pending.set(id, performance.now()); if (pending.size > 40) pending.clear();
+  const t = expo(throttle, cfg.thrExpo / 100), s = expo(steer, cfg.steerExpo / 100);
+  ws.send(JSON.stringify({type: 'cmd', id, steer: +s.toFixed(3), throttle: +t.toFixed(3)}));
+}, 50);
 
 setInterval(() => {
   const dt = (performance.now() - lastTick) / 1000;
-  $('#fps').textContent = (frames / dt).toFixed(1);
-  $('#bw').textContent  = Math.round(bytes * 8 / dt / 1000);
+  $('#fps').textContent = (frames / dt).toFixed(0);
+  $('#bw').textContent = (bytes * 8 / dt / 1e6).toFixed(1);
   frames = 0; bytes = 0; lastTick = performance.now();
+  if (performance.now() - lastFrameAt > 3000) $('#novideo').classList.remove('hide');
 }, 1000);
 
-// --- управление пальцем -------------------------------------------------
+// ---------- джойстики: мышь и палец ----------
 function bindPad(el, axis, set){
-  const knob = el.querySelector('.knob');
-  let id = null, ox = 0, oy = 0;
-  const R = 90;                                   // ход в пикселях до упора
-  el.addEventListener('pointerdown', e => {
-    id = e.pointerId; ox = e.clientX; oy = e.clientY;
-    el.setPointerCapture(id); el.classList.add('live');
-    const r = el.getBoundingClientRect();
-    knob.style.left = (ox - r.left) + 'px'; knob.style.top = (oy - r.top) + 'px';
-  });
+  const knob = el.querySelector('.knob'); let id = null, o = 0;
+  const R = 84;
+  el.addEventListener('pointerdown', e => { id = e.pointerId; o = axis === 'y' ? e.clientY : e.clientX; el.setPointerCapture(id); });
   el.addEventListener('pointermove', e => {
     if (e.pointerId !== id) return;
-    const d = axis === 'y' ? -(e.clientY - oy) : (e.clientX - ox);
-    set(Math.max(-1, Math.min(1, d / R)));
+    const d = axis === 'y' ? -(e.clientY - o) : (e.clientX - o);
+    set(Math.max(-1, Math.min(1, d / R))); kbLive = false;
   });
-  const up = e => {
-    if (e.pointerId !== id) return;
-    id = null; el.classList.remove('live'); set(0);   // отпустил — в ноль
-  };
-  el.addEventListener('pointerup', up);
-  el.addEventListener('pointercancel', up);
+  const up = e => { if (e.pointerId !== id) return; id = null; set(0); };
+  el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
 }
 bindPad($('#padT'), 'y', v => throttle = v);
 bindPad($('#padS'), 'x', v => steer = v);
+(function draw(){
+  $('#padT .knob').style.transform = `translateY(${-throttle * 52}px)`;
+  $('#padS .knob').style.transform = `translateX(${steer * 52}px)`;
+  $('#tVal').textContent = Math.round(throttle * 100) + '%';
+  $('#sVal').textContent = Math.round(steer * 100) + '%';
+  requestAnimationFrame(draw);
+})();
 
-const sendReset = () => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({type:'reset'})); };
-$('#reset').addEventListener('click', sendReset);
-
-// --- клавиатура: стрелки / WASD, R — на старт ---------------------------
-// Клавиша — это ступенька, а машинке нужен плавный руль: цель из клавиш,
-// значения к ней подтягиваются в такте отправки команд
-const KEY = {ArrowUp:'up', KeyW:'up', ArrowDown:'down', KeyS:'down',
-             ArrowLeft:'left', KeyA:'left', ArrowRight:'right', KeyD:'right'};
+// ---------- клавиатура ----------
+const KEY = {ArrowUp:'up', KeyW:'up', ArrowDown:'down', KeyS:'down', ArrowLeft:'left', KeyA:'left', ArrowRight:'right', KeyD:'right'};
 const held = new Set(); let kbLive = false;
+const sendReset = () => sendJSON({type: 'reset'});
 addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
   if (e.code === 'KeyR') { sendReset(); e.preventDefault(); return; }
+  if (e.code === 'Escape') { closeDrawers(); return; }
   if (KEY[e.code]) { held.add(KEY[e.code]); kbLive = true; e.preventDefault(); }
 });
 addEventListener('keyup', e => { if (KEY[e.code]) held.delete(KEY[e.code]); });
 addEventListener('blur', () => held.clear());
 function kbTick(){
   if (!kbLive) return;
-  const tT = (held.has('up') ? 1 : 0) - (held.has('down') ? 1 : 0);
+  const k = cfg.kbRate / 100;
+  const tT = ((held.has('up') ? 1 : 0) - (held.has('down') ? 1 : 0)) * cfg.kbThr / 100;
   const tS = (held.has('right') ? 1 : 0) - (held.has('left') ? 1 : 0);
-  throttle += (tT * 0.7 - throttle) * 0.25;        // газ мягко, 70% максимума с клавиши
-  steer    += (tS - steer) * 0.35;                  // руль пошустрее
-  if (Math.abs(throttle) < 0.02) throttle = 0;
-  if (Math.abs(steer) < 0.02) steer = 0;
+  throttle += (tT - throttle) * k; steer += (tS - steer) * Math.min(1, k * 1.4);
+  if (Math.abs(throttle) < .02) throttle = 0; if (Math.abs(steer) < .02) steer = 0;
   if (!held.size && !throttle && !steer) kbLive = false;
 }
 
-// --- геймпад (Xbox / PlayStation / любой с Gamepad API) -----------------
-// газ: правый курок вперёд, левый назад; если курки отпущены — левый стик по вертикали.
-// руль: правый стик по горизонтали (или левый, если правого нет). Мёртвая зона 8%.
+// ---------- геймпад ----------
 let gpLive = false;
-const dz = v => Math.abs(v) < 0.08 ? 0 : (v - Math.sign(v) * 0.08) / 0.92;
-addEventListener('gamepadconnected', e => { $('#gp').style.display = ''; $('#gpName').textContent = e.gamepad.id.split('(')[0].trim().slice(0, 24); });
-addEventListener('gamepaddisconnected', () => { $('#gp').style.display = 'none'; if (gpLive) { throttle = steer = 0; gpLive = false; } });
+const dz = v => Math.abs(v) < .08 ? 0 : (v - Math.sign(v) * .08) / .92;
+addEventListener('gamepadconnected', e => { $('#gpBtn').style.display = ''; $('#gpBtn').textContent = 'геймпад: ' + e.gamepad.id.split('(')[0].trim().slice(0, 18); });
+addEventListener('gamepaddisconnected', () => { $('#gpBtn').style.display = 'none'; if (gpLive) { throttle = steer = 0; gpLive = false; } });
 function gpTick(){
-  const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
-  if (!pads.length) return;
-  const g = pads[0], ax = i => dz(g.axes[i] || 0), bt = i => (g.buttons[i] && g.buttons[i].value) || 0;
-  const trig = bt(7) - bt(6);
-  const t = Math.abs(trig) > 0.05 ? trig : -ax(1);
-  const s = g.axes.length > 2 ? ax(2) : ax(0);
+  const g = (navigator.getGamepads ? [...navigator.getGamepads()] : []).find(Boolean); if (!g) return;
+  const ax = i => dz(g.axes[i] || 0), bt = i => (g.buttons[i] && g.buttons[i].value) || 0;
+  const trig = bt(7) - bt(6), t = Math.abs(trig) > .05 ? trig : -ax(1), s = g.axes.length > 2 ? ax(2) : ax(0);
   if (t || s) { throttle = t; steer = s; gpLive = true; kbLive = false; }
-  else if (gpLive) { throttle = 0; steer = 0; gpLive = false; }   // отпустил — в ноль
-  if (g.buttons[3] && g.buttons[3].pressed) sendReset();          // Y / треугольник — на старт
+  else if (gpLive) { throttle = steer = 0; gpLive = false; }
+  if (g.buttons[3] && g.buttons[3].pressed) sendReset();
 }
 
-// --- видимые джойстики: рисуем текущие газ и руль -------------------------
-(function draw(){
-  $('#stT i').style.transform = `translateY(${-throttle * 48}px)`;
-  $('#stS i').style.transform = `translateX(${steer * 48}px)`;
-  requestAnimationFrame(draw);
-})();
+// ---------- панели ----------
+function closeDrawers(){ $$('.drawer').forEach(d => d.classList.remove('open')); $('#scrim').classList.remove('on');
+  $$('[data-open]').forEach(b => b.classList.remove('on')); }
+$$('[data-open]').forEach(b => b.addEventListener('click', () => {
+  const d = $('#' + b.dataset.open), was = d.classList.contains('open'); closeDrawers();
+  if (!was) { d.classList.add('open'); $('#scrim').classList.add('on'); b.classList.add('on'); renderTele(last); }
+}));
+$$('[data-close]').forEach(b => b.addEventListener('click', closeDrawers));
+$('#scrim').addEventListener('click', closeDrawers);
+$$('.drawer,#top').forEach(el => el.addEventListener('pointerdown', e => e.stopPropagation()));
+$('#resetBtn').addEventListener('click', sendReset);
 
-// --- минимапа: карта из map_build.py, если релей её раздаёт --------------
+// ---------- настройки: слайдеры ----------
+const FMT = {
+  maxThr: v => Math.round(v / 10) + '%', acc: v => (v / 1000).toFixed(1) + ' с', brk: v => (v / 1000).toFixed(1) + ' с',
+  pwm: v => Math.round(v / 10) + '%', kp: v => v, thrExpo: v => v + '%', steerExpo: v => v + '%',
+  kbThr: v => v + '%', kbRate: v => v + '%',
+};
+const ESPKEY = {maxThr: 'max_thr', acc: 'acc_ms', brk: 'brk_ms', pwm: 'steer_pwm_max', kp: 'steer_kp'};
+const touched = {};   // слайдер, который двигали недавно, телеметрия не перетирает
+$$('input[type=range]').forEach(r => {
+  const show = () => { $('#' + r.id + 'V').textContent = FMT[r.id](+r.value); };
+  if (r.dataset.local !== undefined) { r.value = cfg[r.id]; show(); }
+  r.addEventListener('input', () => {
+    show(); touched[r.id] = performance.now();
+    if (r.dataset.local !== undefined) { cfg[r.id] = +r.value; saveLocal(); }
+  });
+  r.addEventListener('change', () => { if (r.dataset.esp) espCmd(`${r.dataset.esp},${r.value}`); touched[r.id] = performance.now(); });
+});
+function syncEsp(m){
+  for (const [id, k] of Object.entries(ESPKEY)) {
+    const r = $('#' + id); if (m[k] === undefined) { r.closest('.row').style.display = id === 'pwm' || id === 'kp' ? 'none' : ''; continue; }
+    r.closest('.row').style.display = '';
+    if (performance.now() - (touched[id] || 0) < 1500) continue;
+    r.value = m[k]; $('#' + id + 'V').textContent = FMT[id](m[k]);
+  }
+  const MODES = ['выкл', 'ручной', 'по датчику'];
+  $('#modeV').textContent = MODES[m.steer_mode] ?? '—';
+  $$('[data-cmd^="mode,"]').forEach(b => b.classList.toggle('on', b.dataset.cmd === 'mode,' + m.steer_mode));
+  $('[data-cmd="inv"]').classList.toggle('on', !!m.inv);
+  if (m.pot !== undefined) {
+    const x = v => (Math.max(0, Math.min(1023, v)) / 1023 * 100) + '%';
+    $('#cCur').style.left = x(m.pot);
+    [['#cL', m.potL], ['#cC', m.potC], ['#cR', m.potR]].forEach(([s, v]) => { $(s).style.display = v >= 0 ? '' : 'none'; if (v >= 0) $(s).style.left = x(v); });
+  }
+}
+$$('[data-cmd]').forEach(b => b.addEventListener('click', () => espCmd(b.dataset.cmd)));
+
+// ---------- телеметрия ----------
+const yn = (v, badIfTrue = true) => v === undefined ? undefined : (v ? `<span class="${badIfTrue ? 'badc' : 'good'}">да</span>` : `<span class="${badIfTrue ? 'good' : 'badc'}">нет</span>`);
+function dl(id, rows){ $(id).innerHTML = rows.filter(r => r[1] !== undefined && r[1] !== null).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join(''); }
+function renderTele(m){
+  if (!$('#tele').classList.contains('open') || !m) return;
+  const cal = v => v >= 0 ? v : '—';
+  dl('#tSteer', [['потенциометр', m.pot], ['калибровка Л · Ц · П', m.pot !== undefined ? `${cal(m.potL)} · ${cal(m.potC)} · ${cal(m.potR)}` : undefined],
+    ['ШИМ моторчика', m.steer_pwm], ['сила руля', m.steer_pwm_max !== undefined ? Math.round(m.steer_pwm_max / 10) + '%' : undefined],
+    ['команда руля', m.steer !== undefined ? Math.round(m.steer * 100) + '%' : undefined]]);
+  dl('#tDrive', [['команда газа', m.thr !== undefined ? Math.round(m.thr * 100) + '%' : undefined], ['сигнал регулятора', m.esc_us !== undefined ? m.esc_us + ' мкс' : undefined],
+    ['скорость', m.speed]]);
+  dl('#tLink', [['failsafe борта', yn(m.failsafe)], ['failsafe ESP', yn(m.esp_failsafe)],
+    ['последний ответ ESP', m.esp_age_ms === null ? '<span class="badc">нет связи</span>' : (m.esp_age_ms !== undefined ? m.esp_age_ms + ' мс' : undefined)],
+    ['Wi-Fi борта', m.wifi_dbm !== undefined ? `<span class="${m.wifi_dbm > -65 ? 'good' : m.wifi_dbm > -75 ? 'warnc' : 'badc'}">${m.wifi_dbm} дБм</span>` : undefined]]);
+  dl('#tPi', [['камера', m.cam === 'ok' ? '<span class="good">работает</span>' : (m.cam ? `<span class="badc">${m.cam}</span>` : undefined)],
+    ['температура', m.temp !== undefined ? `<span class="${m.temp < 70 ? 'good' : 'warnc'}">${m.temp} °C</span>` : undefined],
+    ['нагрузка CPU', m.cpu_load], ['свободно ОЗУ', m.mem_free_mb !== undefined ? m.mem_free_mb + ' МБ' : undefined],
+    ['просадка питания сейчас', yn(m.undervolt)], ['просадка была', yn(m.undervolt_seen)],
+    ['работает', m.uptime_s !== undefined ? Math.floor(m.uptime_s / 60) + ' мин' : undefined]]);
+}
+
+// ---------- минимапа (полигон стенда) ----------
 let mapMeta = null, mapImg = null, trail = [];
 fetch('/map/map.json').then(r => r.ok ? r.json() : null).then(m => {
-  if (!m) return;
-  mapMeta = m; mapImg = new Image(); mapImg.src = '/map/map.png';
+  if (!m) return; mapMeta = m; mapImg = new Image(); mapImg.src = '/map/map.png';
   mapImg.onload = () => { $('#mini').style.display = 'block'; };
 }).catch(() => {});
 function drawMini(t){
@@ -282,23 +409,19 @@ function drawMini(t){
   const c = $('#mini'), g = c.getContext('2d');
   const k = Math.min(c.width / mapMeta.width, c.height / mapMeta.height);
   const ox = (c.width - mapMeta.width * k) / 2, oy = (c.height - mapMeta.height * k) / 2;
-  g.clearRect(0, 0, c.width, c.height);
-  g.imageSmoothingEnabled = false;
+  g.clearRect(0, 0, c.width, c.height); g.imageSmoothingEnabled = false;
   g.drawImage(mapImg, ox, oy, mapMeta.width * k, mapMeta.height * k);
-  const P = (x, y) => [ox + (x - mapMeta.origin[0]) / mapMeta.res * k,
-                       oy + (mapMeta.height - (y - mapMeta.origin[1]) / mapMeta.res) * k];
+  const P = (x, y) => [ox + (x - mapMeta.origin[0]) / mapMeta.res * k, oy + (mapMeta.height - (y - mapMeta.origin[1]) / mapMeta.res) * k];
   trail.push([t.x, t.y]); if (trail.length > 400) trail.shift();
-  g.strokeStyle = 'rgba(96,165,250,.8)'; g.lineWidth = 1; g.beginPath();
-  trail.forEach(([x, y], i) => { const [a, b] = P(x, y); i ? g.lineTo(a, b) : g.moveTo(a, b); });
-  g.stroke();
-  for (const [ox, oy, orad] of (t.obstacles || [])) {
-    const [a, b] = P(ox, oy); g.fillStyle = '#fb923c'; g.beginPath(); g.arc(a, b, Math.max(2, orad / mapMeta.res * k), 0, 7); g.fill();
-  }
+  g.strokeStyle = 'rgba(255,173,51,.8)'; g.lineWidth = 1; g.beginPath();
+  trail.forEach(([x, y], i) => { const [a, b] = P(x, y); i ? g.lineTo(a, b) : g.moveTo(a, b); }); g.stroke();
+  for (const [bx, by, br] of (t.obstacles || [])) { const [a, b] = P(bx, by); g.fillStyle = '#ff6257'; g.beginPath(); g.arc(a, b, Math.max(2, br / mapMeta.res * k), 0, 7); g.fill(); }
   const [cx, cy] = P(t.x, t.y), r = 5;
-  g.fillStyle = t.collision ? '#f87171' : '#4ade80'; g.beginPath();
+  g.fillStyle = t.collision ? '#ff6257' : '#5fd38a'; g.beginPath();
   g.moveTo(cx + r * Math.cos(-t.yaw), cy + r * Math.sin(-t.yaw));
   g.lineTo(cx + r * Math.cos(-t.yaw + 2.5), cy + r * Math.sin(-t.yaw + 2.5));
-  g.lineTo(cx + r * Math.cos(-t.yaw - 2.5), cy + r * Math.sin(-t.yaw - 2.5));
-  g.closePath(); g.fill();
+  g.lineTo(cx + r * Math.cos(-t.yaw - 2.5), cy + r * Math.sin(-t.yaw - 2.5)); g.closePath(); g.fill();
 }
 </script>
+</body>
+</html>

@@ -16,7 +16,8 @@
 // Протокол (текстом, строка на команду; одинаково по WebSocket и USB):
 //   c,<id>,<руль -1000..1000>,<газ -1000..1000>    команда, 20 Гц
 //   mode,<0|1|2>  cal,<l|c|r>  inv  max,<0..1000>  acc,<мс>  brk,<мс>  калибровка и настройки
-// Ответ: t,<ack>,<pot>,<esc_us>,<мотор>,<failsafe>,<mode>,<potL>,<potC>,<potR>,<inv>,<max>,<источник>,<разгон мс>,<торможение мс>
+//   pwm,<200..1000> сила руля (потолок ШИМ моторчика)   kp,<1..30> жёсткость удержания   minpwm,<0..800>
+// Ответ: t,<ack>,<pot>,<esc_us>,<мотор>,<failsafe>,<mode>,<potL>,<potC>,<potR>,<inv>,<max>,<источник>,<разгон мс>,<торможение мс>,<pwm>,<kp>,<minpwm>
 
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
@@ -129,13 +130,16 @@ void handle(char* s, const char* from) {
   else if (!strncmp(s, "max,", 4)) { cfg.maxThr = constrain(atoi(s + 4), 0, 1000); cfgSave(); }
   else if (!strncmp(s, "acc,", 4)) { cfg.accMs = constrain(atoi(s + 4), 50, 5000); cfgSave(); }
   else if (!strncmp(s, "brk,", 4)) { cfg.brkMs = constrain(atoi(s + 4), 50, 5000); cfgSave(); }
+  else if (!strncmp(s, "pwm,", 4)) { cfg.maxPwm = constrain(atoi(s + 4), 200, 1000); cfgSave(); }
+  else if (!strncmp(s, "kp,", 3)) { cfg.kp = constrain(atoi(s + 3), 1, 30); cfgSave(); }
+  else if (!strncmp(s, "minpwm,", 7)) { cfg.minPwm = constrain(atoi(s + 7), 0, 800); cfgSave(); }
   else if (!strcmp(s, "reset")) { cfgDefaults(); cfgSave(); }
 }
 
 String tele() {
-  char b[128];
-  snprintf(b, sizeof b, "t,%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d", (long)lastId, pot, escUs, motorOut, failsafe,
-           cfg.mode, cfg.potL, cfg.potC, cfg.potR, cfg.inv, cfg.maxThr, src, cfg.accMs, cfg.brkMs);
+  char b[160];
+  snprintf(b, sizeof b, "t,%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d,%d,%d,%d", (long)lastId, pot, escUs, motorOut, failsafe,
+           cfg.mode, cfg.potL, cfg.potC, cfg.potR, cfg.inv, cfg.maxThr, src, cfg.accMs, cfg.brkMs, cfg.maxPwm, cfg.kp, cfg.minPwm);
   return String(b);
 }
 

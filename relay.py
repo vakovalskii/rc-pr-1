@@ -188,6 +188,45 @@ async def ws_depthview(request):                   # зрители: пульт�
         depth_viewers.discard(ws)
     return ws
 
+# --- живая 3D-карта: live_slam.py (на маке) шлёт сюда куски облака и позу, страницы /map3d.html смотрят.
+# Куски облака копим, чтобы вкладка, открытая посреди проезда, сразу получила всё, что уже собрано.
+map3d = {"chunks": [], "pose": None, "viewers": set()}
+
+async def _m3_send(ws, data, binary):
+    try: await (ws.send_bytes(data) if binary else ws.send_str(data))
+    except Exception: map3d["viewers"].discard(ws)
+
+async def ws_map3d(request):                       # источник: live_slam.py
+    ws = web.WebSocketResponse(max_msg_size=32 << 20)
+    await ws.prepare(request)
+    print("[map3d] SLAM подключился")
+    async for msg in ws:
+        binary = msg.type == WSMsgType.BINARY
+        if not binary and msg.type != WSMsgType.TEXT: continue
+        if binary: map3d["chunks"].append(msg.data)
+        else:
+            m = json.loads(msg.data)
+            if m.get("type") == "reset": map3d["chunks"].clear()
+            if m.get("type") == "pose": map3d["pose"] = msg.data
+        for v in list(map3d["viewers"]): asyncio.ensure_future(_m3_send(v, msg.data, binary))
+    print("[map3d] SLAM отключился")
+    return ws
+
+async def ws_map3dview(request):                   # зрители: /map3d.html
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    for c in list(map3d["chunks"]): await ws.send_bytes(c)
+    if map3d["pose"]: await ws.send_str(map3d["pose"])
+    map3d["viewers"].add(ws)
+    try:
+        async for _ in ws: pass
+    finally:
+        map3d["viewers"].discard(ws)
+    return ws
+
+async def map3d_page(request):
+    return web.FileResponse(WEB / "map3d.html")
+
 async def index(request):
     return web.FileResponse(WEB / "pult.html")
 
@@ -231,6 +270,9 @@ def make_app(map_dir=None):
         web.get("/ws/pult", ws_pult),
         web.get("/ws/depth", ws_depth),
         web.get("/ws/depthview", ws_depthview),
+        web.get("/map3d.html", map3d_page),
+        web.get("/ws/map3d", ws_map3d),
+        web.get("/ws/map3dview", ws_map3dview),
         web.static("/web", WEB),
     ]
     if map_dir:                                  # карта полигона для минимапы и /map.html

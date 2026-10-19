@@ -17,6 +17,38 @@ import argparse, json, math, pathlib, time
 import numpy as np
 import open3d as o3d
 
+class Tracker:
+    """Одометрия против ключевого кадра (а не соседнего) — меньше копится дрейф. Новый ключ — когда
+    отъехали на key_m или повернулись на key_deg. Начальное приближение — движение прошлого шага.
+    Потеряли трекинг — стоим на месте; потеряли reset_after раз подряд (уехали далеко от ключа) —
+    текущий кадр становится новым ключом в старой позе: карта не обрывается, но здесь возможен скачок."""
+    def __init__(self, cam_i, depth_max, key_m=0.10, key_deg=10, reset_after=5):
+        self.cam_i, self.key_m, self.key_deg, self.reset_after = cam_i, key_m, key_deg, reset_after
+        self.opt = o3d.pipelines.odometry.OdometryOption(depth_diff_max=0.07, depth_min=0.2, depth_max=depth_max)
+        self.jac = o3d.pipelines.odometry.RGBDOdometryJacobianFromHybridTerm()
+        self.T, self.key, self.Tkey, self.dT = np.eye(4), None, np.eye(4), np.eye(4)
+        self.poses, self.lost, self.miss, self.jumps = [], 0, 0, 0
+
+    def step(self, rgbd):
+        """→ (поза камеры в мире первого кадра 4x4, ключевой ли это кадр — его точки надо добавить в облако)."""
+        if self.key is None:
+            self.key = rgbd; self.poses.append(self.T.copy()); return self.T, True
+        init = np.linalg.inv(self.Tkey) @ self.T @ self.dT
+        ok, rel, _ = o3d.pipelines.odometry.compute_rgbd_odometry(rgbd, self.key, self.cam_i, init, self.jac, self.opt)
+        if not ok:
+            self.lost += 1; self.miss += 1; self.poses.append(self.T.copy())
+            if self.miss >= self.reset_after:
+                self.key, self.Tkey, self.dT, self.miss = rgbd, self.T.copy(), np.eye(4), 0; self.jumps += 1
+            return self.T, False
+        self.miss = 0
+        Tn = self.Tkey @ rel; self.dT = np.linalg.inv(self.T) @ Tn; self.T = Tn
+        self.poses.append(self.T.copy())
+        d = np.linalg.inv(self.Tkey) @ self.T
+        ang = math.degrees(math.acos(max(-1, min(1, (np.trace(d[:3, :3]) - 1) / 2))))
+        if np.linalg.norm(d[:3, 3]) > self.key_m or ang > self.key_deg:
+            self.key, self.Tkey = rgbd, self.T.copy(); return self.T, True
+        return self.T, False
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("dir")
@@ -33,34 +65,21 @@ def main():
     cam_i = o3d.camera.PinholeCameraIntrinsic(K["width"], K["height"], K["fx"], K["fy"], K["cx"], K["cy"])
     scale = 1.0 / K["depth_scale"]
     pcd = o3d.geometry.PointCloud()      # ScalableTSDFVolume в open3d 0.20 на маке пустой — копим облака ключевых кадров
-    opt = o3d.pipelines.odometry.OdometryOption(depth_diff_max=0.07, depth_min=0.2, depth_max=a.depth_max)
-    jac = o3d.pipelines.odometry.RGBDOdometryJacobianFromHybridTerm()
 
     def load(i):
         c = o3d.io.read_image(str(raw / "color" / names[i])); d = o3d.io.read_image(str(dfiles[i]))
         return o3d.geometry.RGBDImage.create_from_color_and_depth(c, d, depth_scale=scale, depth_trunc=a.depth_max,
                                                                   convert_rgb_to_intensity=False)
 
-    # Одометрия против ключевого кадра (а не соседнего) — меньше копится дрейф. Новый ключ — когда
-    # отъехали на 10 см или повернулись на 10°. Начальное приближение — движение прошлого шага.
-    poses, lost, t0 = [], 0, time.time()
-    T, key, Tkey, step = np.eye(4), load(0), np.eye(4), np.eye(4)
+    tr, t0 = Tracker(cam_i, a.depth_max), time.time()
     for i in range(len(dfiles)):
-        cur = load(i) if i else key
-        if i:
-            init = np.linalg.inv(Tkey) @ T @ step
-            ok, rel, _ = o3d.pipelines.odometry.compute_rgbd_odometry(cur, key, cam_i, init, jac, opt)
-            if not ok:                                   # потеряли: стоим на месте, кадр не вклеиваем
-                lost += 1; poses.append(T.copy()); continue
-            Tn = Tkey @ rel; step = np.linalg.inv(T) @ Tn; T = Tn
-            d = np.linalg.inv(Tkey) @ T
-            if not (np.linalg.norm(d[:3, 3]) > 0.10 or math.degrees(math.acos(min(1, (np.trace(d[:3, :3]) - 1) / 2))) > 10):
-                poses.append(T.copy()); continue
-            key, Tkey = cur, T.copy()
-        poses.append(T.copy())                           # ключевой кадр: его точки — в облако
-        pcd += o3d.geometry.PointCloud.create_from_rgbd_image(cur, cam_i, np.linalg.inv(T))
-        pcd = pcd.voxel_down_sample(a.voxel)
-        if i % 50 == 0: print(f"  кадр {i}/{len(dfiles)}, потеряно {lost}, {time.time() - t0:.0f} с")
+        cur = load(i)
+        T, is_key = tr.step(cur)
+        if is_key:                                       # ключевой кадр: его точки — в облако
+            pcd += o3d.geometry.PointCloud.create_from_rgbd_image(cur, cam_i, np.linalg.inv(T))
+            pcd = pcd.voxel_down_sample(a.voxel)
+        if i % 50 == 0: print(f"  кадр {i}/{len(dfiles)}, потеряно {tr.lost}, {time.time() - t0:.0f} с")
+    poses, lost = tr.poses, tr.lost
 
     pcd, _ = pcd.remove_statistical_outlier(20, 2.0)
     xyz = np.asarray(pcd.points); rgb = np.asarray(pcd.colors)

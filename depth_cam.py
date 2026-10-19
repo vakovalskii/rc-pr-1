@@ -64,14 +64,15 @@ class Recorder:
         self.align = rs.align(rs.stream.color)
         threading.Thread(target=self._writer, daemon=True).start()
 
-    def feed(self, fs, scale):
+    def feed(self, fs, scale, want_raw=False):
+        """Пишет кадр, если идёт запись; с want_raw ещё и возвращает уменьшенную пару для живой 3D-карты."""
         on = REC_FLAG.exists()
-        if not on:
-            if self.dir: print(f"запись остановлена: {self.dir}, {self.n} кадров, пропущено {self.dropped}"); self.dir = None
-            return
+        if not on and self.dir: print(f"запись остановлена: {self.dir}, {self.n} кадров, пропущено {self.dropped}"); self.dir = None
+        if not on and not want_raw: return None
         al = self.align.process(fs)
         d, c = al.get_depth_frame(), al.get_color_frame()
-        if not d or not c: return
+        if not d or not c: return None
+        if not on: return self._raw(d, c, scale, None) if want_raw else None
         if not self.dir:
             self.dir = pathlib.Path.home() / "rec" / time.strftime("%Y%m%d-%H%M%S")
             (self.dir / "depth").mkdir(parents=True); (self.dir / "color").mkdir()
@@ -83,6 +84,20 @@ class Recorder:
             self.q.put_nowait((self.dir, self.n, c.get_timestamp(), np.asanyarray(d.get_data()).copy(), np.asanyarray(c.get_data()).copy()))
             self.n += 1
         except queue.Full: self.dropped += 1
+        return self._raw(d, c, scale, self.dir.name) if want_raw else None
+
+    @staticmethod
+    def _raw(d, c, scale, rec_name):
+        """RGBD пополам (320x240): b"RGBD" + json интринсик + PNG глубины + JPEG цвета, длины uint32."""
+        z = np.asanyarray(d.get_data())[::2, ::2].copy()
+        rgb = Image.fromarray(np.asanyarray(c.get_data())).reduce(2)
+        i = c.profile.as_video_stream_profile().intrinsics
+        meta = json.dumps({"w": z.shape[1], "h": z.shape[0], "fx": i.fx / 2, "fy": i.fy / 2, "cx": i.ppx / 2, "cy": i.ppy / 2,
+                           "depth_scale": scale, "t": time.time(), "rec": rec_name}).encode()
+        bz = io.BytesIO(); Image.fromarray(z).save(bz, "PNG", compress_level=1)
+        bc = io.BytesIO(); rgb.save(bc, "JPEG", quality=80)
+        bz = bz.getvalue()
+        return b"RGBD" + len(meta).to_bytes(4, "little") + meta + len(bz).to_bytes(4, "little") + bz + bc.getvalue()
 
     def _writer(self):
         while True:
@@ -92,10 +107,14 @@ class Recorder:
             with open(dr / "frames.csv", "a") as f: f.write(f"{i},{ts:.1f}\n")
 
 rec = None
+raw_viewers, raw_at = set(), 0.0                   # live_slam.py: уменьшенная RGBD-пара несколько раз в секунду
 
 def grab(pipe, scale, a, filt):
+    global raw_at
     fs = pipe.wait_for_frames(2000)
-    if rec: rec.feed(fs, scale)
+    want = bool(raw_viewers) and time.time() - raw_at >= 1 / a.raw_fps
+    rawmsg = rec.feed(fs, scale, want) if rec else None
+    if rawmsg: raw_at = time.time()
     d = fs.get_depth_frame()
     for f in filt: d = f.process(d)
     z = np.asanyarray(d.get_data()).astype(np.float32) * scale
@@ -108,7 +127,7 @@ def grab(pipe, scale, a, filt):
              "valid": round(float((z > 0).mean()), 2), "w": w, "h": h,
              **({"rec": rec.n, "rec_drop": rec.dropped, "rec_s": round(time.time() - rec.t0, 1)} if rec and rec.dir else {})}
     buf = io.BytesIO(); Image.fromarray(colorize(z, a.near, a.far)).save(buf, "JPEG", quality=a.quality)
-    return buf.getvalue(), stats
+    return buf.getvalue(), stats, rawmsg
 
 last_frame = time.time()
 
@@ -136,15 +155,17 @@ async def serve_viewer(ws):                        # пульт подключи
         async for raw in ws:                       # кнопка «запись 3D» в пульте
             try: m = json.loads(raw)
             except Exception: continue
+            if m.get("type") == "raw":             # это live_slam: ему только сырые пары, без картинки
+                viewers.discard(ws); raw_viewers.add(ws)
             if m.get("type") == "rec":
                 if m.get("on"): REC_FLAG.touch()
                 else: REC_FLAG.unlink(missing_ok=True)
-    finally: viewers.discard(ws)
+    finally: viewers.discard(ws); raw_viewers.discard(ws)
 
 async def _send(ws, data):
     busy.add(ws)
     try: await ws.send(data)
-    except Exception: viewers.discard(ws)
+    except Exception: viewers.discard(ws); raw_viewers.discard(ws)
     finally: busy.discard(ws)
 
 def to_viewers(jpeg, stats):
@@ -173,7 +194,9 @@ async def main(a):
             if a.serve: await ws.send(json.dumps({"type": "depthsrc", "port": a.serve}))
             n, t0 = 0, time.time()
             while True:
-                jpeg, stats = await loop.run_in_executor(None, grab_checked, pipe, scale, a, filt)
+                jpeg, stats, rawmsg = await loop.run_in_executor(None, grab_checked, pipe, scale, a, filt)
+                for v in list(raw_viewers):
+                    if rawmsg and v not in busy: asyncio.ensure_future(_send(v, rawmsg))
                 n += 1
                 stats["fps"] = round(n / max(time.time() - t0, 1e-3), 1); stats["usb"] = usb
                 if time.time() - t0 > 5: n, t0 = 0, time.time()
@@ -197,5 +220,6 @@ if __name__ == "__main__":
     p.add_argument("--watchdog", type=float, default=5, help="с без кадров до перезапуска")
     p.add_argument("--serve", type=int, default=0, help="порт: отдавать кадры пультам напрямую, релею — только адрес и цифры")
     p.add_argument("--color", action="store_true", help="включить цветную камеру и запись для SLAM по флагу ~/rc/rec.on")
+    p.add_argument("--raw-fps", type=float, default=4, help="к/с уменьшенных RGBD-пар для живой 3D-карты (live_slam.py)")
     p.add_argument("--reset", action="store_true", help="аппаратный сброс камеры при старте")
     asyncio.run(main(p.parse_args()))

@@ -18,7 +18,7 @@ TELE_KEYS = ("speed", "pos", "yaw", "x", "y", "kf", "collision", "collisions", "
 class Hub:
     def __init__(self):
         self.car = None
-        self.pults = set()
+        self.pults, self.busy = set(), set()
         self.pilots = set()                                # пульты, объявившие себя автопилотом
         self.stats = {"frames": 0, "bytes": 0, "since": time.time()}
         self.last_cmd = {"steer": 0.0, "throttle": 0.0}   # с чем спаривать кадр
@@ -57,15 +57,18 @@ class Hub:
         self.rec["log"].flush()
         self.rec["n"] = i + 1
 
+    async def _send(self, ws, msg, binary):
+        self.busy.add(ws)
+        try: await (ws.send_bytes(msg) if binary else ws.send_str(msg))
+        except Exception: self.pults.discard(ws)
+        finally: self.busy.discard(ws)
+
     async def to_pults(self, msg, binary=False):
-        dead = []
-        for ws in self.pults:
-            try:
-                await (ws.send_bytes(msg) if binary else ws.send_str(msg))
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            self.pults.discard(ws)
+        # Каждому пульту — отдельно и без ожидания: медленный пульт (или плохой Wi-Fi до него)
+        # не тормозит остальных, а кадр, пришедший пока он занят, пропускаем — очередь не копится.
+        for ws in list(self.pults):
+            if binary and ws in self.busy: continue
+            asyncio.ensure_future(self._send(ws, msg, binary))
 
 hub = Hub()
 

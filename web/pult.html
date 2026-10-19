@@ -182,7 +182,7 @@
   <div class="pill"><span class="dot" id="dot"></span><b id="link">нет связи</b></div>
   <div class="pill" id="state">—</div>
   <div class="pill wide"><span class="k">отклик</span><b class="num" id="rtt">—</b><span class="k">мс</span></div>
-  <div class="pill wide"><span class="k">видео</span><b class="num" id="fps">—</b><span class="k">к/с</span><b class="num" id="bw">—</b><span class="k">Мбит/с</span></div>
+  <div class="pill wide"><span class="k">видео</span><b class="num" id="fps">—</b><span class="k">к/с</span><b class="num" id="bw">—</b><span class="k">Мбит/с</span><b class="num" id="vlat">—</b><span class="k">мс</span></div>
   <div class="pill wide" id="wifiPill" style="display:none"><span class="k">Wi-Fi</span><b class="num" id="wifi">—</b><span class="k">дБм</span></div>
   <div class="pill" id="apPill">автопилот ведёт</div>
   <div class="pill" id="pos" style="display:none"><span class="k">x</span><b class="num" id="px">0</b><span class="k">y</span><b class="num" id="py">0</b><span class="k">удары</span><b class="num" id="hits">0</b></div>
@@ -299,7 +299,7 @@
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 let ws, steer = 0, throttle = 0, cmdId = 0, last = {};
 const pending = new Map();
-let rttEMA = null, frames = 0, bytes = 0, lastTick = performance.now(), lastFrameAt = 0;
+let rttEMA = null, latEMA = null, vBusy = false, frames = 0, bytes = 0, lastTick = performance.now(), lastFrameAt = 0;
 
 // ---------- локальные настройки (в браузере) ----------
 const LOCAL = {thrExpo: 30, steerExpo: 20, kbThr: 50, kbRate: 35};
@@ -317,10 +317,12 @@ function connect(){
                        setState(null); setTimeout(connect, 800); };
   ws.onmessage = e => {
     if (typeof e.data !== 'string') {
-      frames++; bytes += e.data.byteLength; lastFrameAt = performance.now();
-      const url = URL.createObjectURL(new Blob([e.data], {type: 'image/jpeg'}));
-      const old = $('#view').src; $('#view').src = url;
-      if (old.startsWith('blob:')) URL.revokeObjectURL(old);
+      bytes += e.data.byteLength; lastFrameAt = performance.now();
+      if (vBusy) return;                       // прошлый кадр ещё декодируется — этот пропускаем, очередь не копим
+      vBusy = true; frames++;
+      const url = URL.createObjectURL(new Blob([e.data], {type: 'image/jpeg'})), img = $('#view'), old = img.src;
+      img.onload = img.onerror = () => { vBusy = false; if (old.startsWith('blob:')) URL.revokeObjectURL(old); };
+      img.src = url;
       $('#novideo').classList.add('hide');
       return;
     }
@@ -331,6 +333,9 @@ function connect(){
     if (t0 !== undefined) {
       const r = performance.now() - t0; rttEMA = rttEMA === null ? r : rttEMA * .8 + r * .2;
       $('#rtt').textContent = Math.round(rttEMA); pending.clear();
+    }
+    if (m.ft) {                                // задержка видео: от кодера на машинке до пульта (часы обеих по NTP)
+      const l = Date.now() - m.ft; if (l > -50 && l < 5000) latEMA = latEMA === null ? l : latEMA * .85 + l * .15;
     }
     last = m; setState(m); syncEsp(m); renderTele(m); osdTele(m);
     if (m.wifi_dbm !== undefined) { $('#wifiPill').style.display = 'flex'; $('#wifi').textContent = m.wifi_dbm; }
@@ -365,6 +370,7 @@ setInterval(() => {
 setInterval(() => {
   const dt = (performance.now() - lastTick) / 1000;
   $('#fps').textContent = (frames / dt).toFixed(0);
+  $('#vlat').textContent = latEMA === null ? '—' : Math.max(0, Math.round(latEMA));
   $('#bw').textContent = (bytes * 8 / dt / 1e6).toFixed(1);
   frames = 0; bytes = 0; lastTick = performance.now();
   if (performance.now() - lastFrameAt > 3000) $('#novideo').classList.remove('hide');
@@ -496,7 +502,7 @@ function osdTele(m){
   if (m.pot !== undefined) $('#oPot').textContent = m.pot;
   $('#oVolt').style.display = m.undervolt ? '' : 'none';
 }
-setInterval(() => { $('#oFps').textContent = $('#fps').textContent + ' к/с'; }, 1000);
+setInterval(() => { $('#oFps').textContent = $('#fps').textContent + ' к/с · ' + $('#vlat').textContent + ' мс'; }, 1000);
 (function loop(){ osdTick(); requestAnimationFrame(loop); })();
 
 // ---------- второе окно: камера глубины ----------

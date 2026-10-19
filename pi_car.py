@@ -148,10 +148,11 @@ class EspDrive:
 class Latest:
     """Слот на один кадр: старые выбрасываем, иначе задержка копится очередью."""
     def __init__(self, loop):
-        self.loop, self.frame, self.ev = loop, None, asyncio.Event()
+        self.loop, self.frame, self.at, self.ev = loop, None, 0.0, asyncio.Event()
     def put(self, jpeg):
+        t = time.time()                                 # момент выхода кадра из кодера — для замера задержки в пульте
         def f():
-            self.frame = jpeg; self.ev.set()
+            self.frame, self.at = jpeg, t; self.ev.set()
         self.loop.call_soon_threadsafe(f)
     async def get(self):
         await self.ev.wait(); self.ev.clear()
@@ -170,7 +171,7 @@ def start_picamera(sink, a):
     cfg = cam.create_video_configuration(
         main={"size": (a.width, a.height), "format": "YUV420"},
         sensor={"output_size": (1296, 972)},               # биннинг всего сенсора: весь угол 160°
-        controls={"FrameRate": a.fps}, buffer_count=4)
+        controls={"FrameRate": a.fps}, buffer_count=3)   # меньше буферов — меньше кадров в пути
     if a.rotate180:
         from libcamera import Transform
         cfg["transform"] = Transform(hflip=1, vflip=1)
@@ -281,9 +282,11 @@ async def main(a):
             while True:                                   # телеметрия не реже 10 раз в секунду, даже без камеры
                 try: jpeg = await asyncio.wait_for(sink.get(), 0.1)
                 except asyncio.TimeoutError: jpeg = None
+                ft = sink.at                              # запомнить до await: пока шлём, слот может обновиться
                 if jpeg is not None: await ws.send(jpeg)
                 esc_us, servo_us = drive.us()
                 await ws.send(json.dumps({"type": "tele", "seq": seq, "ack": state["id"], "failsafe": state["failsafe"],
+                                          **({"ft": round(ft * 1000)} if jpeg is not None else {}),
                                           "thr": round(drive.throttle, 2), "steer": round(drive.steer, 2),
                                           "esc_us": round(esc_us), "servo_us": round(servo_us),
                                           "cam": state["cam"],
@@ -301,7 +304,7 @@ async def main(a):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--url", default="ws://127.0.0.1:8080/ws/car")
-    p.add_argument("--fps", type=int, default=15)
+    p.add_argument("--fps", type=int, default=30)
     p.add_argument("--width", type=int, default=640)
     p.add_argument("--height", type=int, default=480)
     p.add_argument("--bitrate", type=int, default=2_000_000, help="MJPEG, бит/с")

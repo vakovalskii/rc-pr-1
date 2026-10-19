@@ -10,7 +10,7 @@
 
 pyrealsense2 под Python 3.13 (trixie) колёс нет — запускается из venv на Python 3.12 (uv).
 
-Запись для SLAM (--color): пока существует файл ~/rc/rec.on, кадры глубины, выровненные
+Запись для SLAM (--color): пока существует файл ~/rc/rec.on (его ставит и убирает кнопка «запись 3D» в пульте), кадры глубины, выровненные
 по цветной камере, и сами цветные кадры пишутся в ~/rec/<время>/{depth/*.png, color/*.jpg}
 плюс intrinsics.json и frames.csv. Дальше — slam.py на машине с GPU.
 
@@ -78,7 +78,7 @@ class Recorder:
             i = c.profile.as_video_stream_profile().intrinsics
             (self.dir / "intrinsics.json").write_text(json.dumps({"width": i.width, "height": i.height, "fx": i.fx, "fy": i.fy,
                                                                   "cx": i.ppx, "cy": i.ppy, "depth_scale": scale}))
-            self.n = self.dropped = 0; print(f"запись: {self.dir}")
+            self.n = self.dropped = 0; self.t0 = time.time(); print(f"запись: {self.dir}")
         try:
             self.q.put_nowait((self.dir, self.n, c.get_timestamp(), np.asanyarray(d.get_data()).copy(), np.asanyarray(c.get_data()).copy()))
             self.n += 1
@@ -106,7 +106,7 @@ def grab(pipe, scale, a, filt):
              "center": round(float(np.median(c)), 2) if c.size else None,
              "ahead": round(float(np.percentile(band, 3)), 2) if band.size > 50 else None,   # 3-й перцентиль: шум не считаем препятствием
              "valid": round(float((z > 0).mean()), 2), "w": w, "h": h,
-             **({"rec": rec.n, "rec_drop": rec.dropped} if rec and rec.dir else {})}
+             **({"rec": rec.n, "rec_drop": rec.dropped, "rec_s": round(time.time() - rec.t0, 1)} if rec and rec.dir else {})}
     buf = io.BytesIO(); Image.fromarray(colorize(z, a.near, a.far)).save(buf, "JPEG", quality=a.quality)
     return buf.getvalue(), stats
 
@@ -132,7 +132,13 @@ viewers, busy = set(), set()
 
 async def serve_viewer(ws):                        # пульт подключился напрямую (--serve)
     viewers.add(ws)
-    try: await ws.wait_closed()
+    try:
+        async for raw in ws:                       # кнопка «запись 3D» в пульте
+            try: m = json.loads(raw)
+            except Exception: continue
+            if m.get("type") == "rec":
+                if m.get("on"): REC_FLAG.touch()
+                else: REC_FLAG.unlink(missing_ok=True)
     finally: viewers.discard(ws)
 
 async def _send(ws, data):

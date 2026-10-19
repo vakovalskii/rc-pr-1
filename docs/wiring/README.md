@@ -57,3 +57,9 @@ Pi Zero 2 W — камера и сеть. ESP8266 (NodeMCU, `firmware/rc_esp`) �
 
 ESP в машинке питается от BEC через Vin. По USB на столе — можно, но USB-чип NodeMCU
 сидит на тех же TX/RX и может мешать малине.
+
+## Фото
+
+- `../photos/car.jpg` — машинка в сборе: Pi Zero 2 W + ESP8266 + DRV8837 сверху, Pi 4 под ними, RealSense D455 и OV5647 спереди.
+- `../photos/pult_osd_split.jpg` — пульт: FPV слева (29 к/с, 21 мс), глубина справа напрямую с Pi 4, OSD с газом и рулём.
+- `../photos/fpv_first_test.jpg` — первый тестовый кадр камеры Zero.

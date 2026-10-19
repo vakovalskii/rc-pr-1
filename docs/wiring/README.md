@@ -1,5 +1,7 @@
 # Проводка борта: Pi Zero 2 W + ESP8266 + DRV8837
 
+![Общая схема](board_full.png)
+
 Pi Zero 2 W — камера и сеть. ESP8266 (NodeMCU, `firmware/rc_esp`) — ход, руль по
 потенциометру и failsafe 300 мс. Связь между ними — UART, команды `c,id,руль,газ`.
 

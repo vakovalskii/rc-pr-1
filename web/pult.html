@@ -104,7 +104,7 @@
   .hit{animation:hit .4s} @keyframes hit{from{background:#7f1d1d}to{background:#15181dd9}}
 
   /* OSD: показания поверх видео, как в FPV-очках */
-  #osd{position:fixed;inset:0;z-index:4;pointer-events:none;font:600 14px/1.25 var(--mono);color:#f4f2ec;
+  #osd{position:fixed;inset:0;z-index:6;pointer-events:none;font:600 14px/1.25 var(--mono);color:#f4f2ec;
     text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 4px #000;letter-spacing:.02em}
   #osd.off{display:none}
   #osd .blk{position:absolute;display:flex;flex-direction:column;gap:2px}
@@ -133,7 +133,15 @@
   .bars span.on{opacity:1}
   @media (max-height:460px){ #osdTL,#osdTR{top:calc(env(safe-area-inset-top) + 56px)} #osd{font-size:12px} #osd .big{font-size:16px}
     #osdThr,#osdThrV{display:none} }
-  body.osd .wide{display:none}
+  body.osd .wide,body.osd #wifiPill{display:none!important}
+  #osdQuick{position:absolute;left:50%;top:calc(env(safe-area-inset-top) + 60px);transform:translateX(-50%);display:flex;gap:18px;pointer-events:auto;z-index:7}
+  #osdQuick .q{display:flex;align-items:center;gap:6px}
+  #osdQuick button{width:40px;height:34px;border-radius:7px;border:2px solid #f4f2ec;background:#0d0f1299;color:#f4f2ec;
+    font:700 18px/1 var(--mono);text-shadow:none;cursor:pointer;touch-action:manipulation;box-shadow:0 0 0 1px #000}
+  #osdQuick button:active{background:var(--amber);color:var(--amber-ink);border-color:var(--amber)}
+  #osdQuick button:disabled{opacity:.3;cursor:default}
+  #osdQuick .val{min-width:64px;text-align:center}
+  #osdQuick .k{display:none;color:#cfcabd;font-size:10px} @media (hover:hover){ #osdQuick .k{display:block} }
 
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -166,10 +174,19 @@
   </div>
   <div class="blk" id="osdTR">
     <span><span class="lbl">WI-FI </span><span id="oWifi">—</span><span class="bars" id="oBars"><span style="height:4px"></span><span style="height:7px"></span><span style="height:10px"></span><span style="height:14px"></span></span></span>
-    <span><span class="lbl">CPU </span><span id="oTemp">—</span></span>
+    <span><span class="lbl">ТЕМП Pi </span><span id="oTemp">—</span></span>
+    <span><span class="lbl">НАГРУЗКА </span><span id="oCpu">—</span></span>
     <span><span class="lbl">ESC </span><span id="oEsc">—</span></span>
     <span id="oPotRow"><span class="lbl">РУЛЬ ДАТЧ </span><span id="oPot">—</span></span>
     <span id="oVolt" style="color:var(--bad);display:none">ПИТАНИЕ ПРОСЕЛО</span>
+  </div>
+  <div id="osdQuick">
+    <div class="q"><button data-q="thr" data-d="-50" aria-label="меньше газа">−</button>
+      <div class="val"><span class="lbl">ГАЗ МАКС</span><br><span class="big" id="qThr">—</span><span class="k">1 / 2</span></div>
+      <button data-q="thr" data-d="50" aria-label="больше газа">+</button></div>
+    <div class="q"><button data-q="pwm" data-d="-50" aria-label="слабее руль">−</button>
+      <div class="val"><span class="lbl">РУЛЬ СИЛА</span><br><span class="big" id="qPwm">—</span><span class="k">3 / 4</span></div>
+      <button data-q="pwm" data-d="50" aria-label="сильнее руль">+</button></div>
   </div>
   <div id="osdCross"></div>
   <div id="osdWarn">FAILSAFE</div>
@@ -405,7 +422,35 @@ function osdTick(){
   $('#oSteer').textContent = s + '%';
   $('#oSteerMark').style.left = (50 + s / 2) + '%';
 }
+// быстрые регуляторы на OSD: потолок газа и сила руля прямо на машинке (ESP)
+const quick = {thr: {key: 'max_thr', cmd: 'max', min: 0, max: 1000}, pwm: {key: 'steer_pwm_max', cmd: 'pwm', min: 200, max: 1000}};
+const qPending = {};
+function qStep(name, d){
+  const q = quick[name], cur = qPending[name]?.v ?? last[q.key];
+  if (cur === undefined) return;
+  const v = Math.max(q.min, Math.min(q.max, cur + d));
+  qPending[name] = {v, at: performance.now()};
+  espCmd(`${q.cmd},${v}`); qShow();
+}
+function qShow(){
+  for (const [name, q] of Object.entries(quick)) {
+    const p = qPending[name], fresh = p && performance.now() - p.at < 1500;
+    const v = fresh ? p.v : last[q.key];
+    $(name === 'thr' ? '#qThr' : '#qPwm').textContent = v === undefined ? (name === 'pwm' ? 'прошей ESP' : '—') : Math.round(v / 10) + '%';
+    $$(`[data-q="${name}"]`).forEach(b => b.disabled = v === undefined);
+  }
+}
+$$('#osdQuick button').forEach(b => {
+  b.addEventListener('pointerdown', e => e.stopPropagation());
+  b.addEventListener('click', () => qStep(b.dataset.q, +b.dataset.d));
+});
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  const k = {Digit1: ['thr', -50], Digit2: ['thr', 50], Digit3: ['pwm', -50], Digit4: ['pwm', 50]}[e.code];
+  if (k) { qStep(...k); e.preventDefault(); }
+});
 function osdTele(m){
+  qShow();
   $('#oRtt').textContent = rttEMA === null ? '—' : Math.round(rttEMA) + ' мс';
   const fs = m.failsafe || m.esp_failsafe;
   $('#osdWarn').classList.toggle('on', !!fs);
@@ -414,7 +459,9 @@ function osdTele(m){
     const n = m.wifi_dbm > -55 ? 4 : m.wifi_dbm > -65 ? 3 : m.wifi_dbm > -75 ? 2 : 1;
     $$('#oBars span').forEach((b, i) => b.classList.toggle('on', i < n));
   }
-  $('#oTemp').textContent = m.temp !== undefined ? m.temp + '°C' + (m.cpu_load !== undefined ? ' · ' + m.cpu_load : '') : '—';
+  $('#oTemp').textContent = m.temp !== undefined ? m.temp + '°C' : '—';
+  $('#oTemp').style.color = m.temp === undefined ? '' : m.temp >= 75 ? 'var(--bad)' : m.temp >= 65 ? 'var(--warn)' : '';
+  $('#oCpu').textContent = m.cpu_load !== undefined ? m.cpu_load : '—';
   $('#oEsc').textContent = m.esc_us !== undefined ? m.esc_us + ' мкс' : '—';
   $('#oPotRow').style.display = m.pot !== undefined ? '' : 'none';
   if (m.pot !== undefined) $('#oPot').textContent = m.pot;

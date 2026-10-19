@@ -9,13 +9,30 @@
     до ближайшего препятствия в полосе по курсу (центральная треть ширины, средняя часть высоты).
 
 pyrealsense2 под Python 3.13 (trixie) колёс нет — запускается из venv на Python 3.12 (uv).
+
+Надёжность: камера на USB может пропасть и вернуться под новым номером — старый
+pipeline тогда мёртв навсегда. Поэтому любой сбой камеры или 5 с без кадров =
+выход с кодом ошибки, а systemd (rc-depth.service) перезапускает процесс без
+ограничения попыток. При старте ждём камеру и делаем ей аппаратный сброс.
 """
-import argparse, asyncio, io, json, time
+import argparse, asyncio, io, json, os, threading, time
 import numpy as np
 import pyrealsense2 as rs
 from PIL import Image
 
+def wait_camera(timeout=60):
+    """Ждём, пока RealSense появится на USB (после переподключения или включения)."""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        devs = rs.context().query_devices()
+        if len(devs): return devs[0]
+        time.sleep(1)
+    print("RealSense не найдена на USB за минуту — выходим, systemd перезапустит"); os._exit(4)
+
 def open_camera(a):
+    dev = wait_camera()
+    if a.reset:                                    # аппаратный сброс: камера после сбоя бывает «полуживой»
+        print("аппаратный сброс камеры…"); dev.hardware_reset(); time.sleep(3); wait_camera()
     pipe, cfg = rs.pipeline(), rs.config()
     cfg.enable_stream(rs.stream.depth, a.width, a.height, rs.format.z16, a.fps)
     prof = pipe.start(cfg)
@@ -48,9 +65,30 @@ def grab(pipe, scale, a, filt):
     buf = io.BytesIO(); Image.fromarray(colorize(z, a.near, a.far)).save(buf, "JPEG", quality=a.quality)
     return buf.getvalue(), stats
 
+last_frame = time.time()
+
+def watchdog(limit):
+    """Нет кадров дольше limit секунд — процесс завершается, systemd поднимает заново."""
+    while True:
+        time.sleep(1)
+        if time.time() - last_frame > limit:
+            print(f"СТОРОЖ: {limit} с без кадров глубины — перезапуск"); os._exit(3)
+
+def grab_checked(pipe, scale, a, filt):
+    global last_frame
+    try:
+        r = grab(pipe, scale, a, filt)
+    except Exception as e:                         # камера отвалилась: pipeline уже не оживёт
+        print(f"сбой камеры: {e.__class__.__name__}: {e} — перезапуск"); os._exit(2)
+    last_frame = time.time()
+    return r
+
 async def main(a):
     import websockets
+    global last_frame
     pipe, scale, usb = open_camera(a)
+    last_frame = time.time()
+    threading.Thread(target=watchdog, args=(a.watchdog,), daemon=True).start()
     filt = [rs.spatial_filter(), rs.temporal_filter(), rs.hole_filling_filter(1)] if a.filters else []
     loop = asyncio.get_running_loop()
     while True:
@@ -60,13 +98,13 @@ async def main(a):
             print(f"на связи с {a.url}")
             n, t0 = 0, time.time()
             while True:
-                jpeg, stats = await loop.run_in_executor(None, grab, pipe, scale, a, filt)
+                jpeg, stats = await loop.run_in_executor(None, grab_checked, pipe, scale, a, filt)
                 n += 1
                 stats["fps"] = round(n / max(time.time() - t0, 1e-3), 1); stats["usb"] = usb
                 if time.time() - t0 > 5: n, t0 = 0, time.time()
                 await ws.send(jpeg); await ws.send(json.dumps(stats))
-        except Exception as e:
-            print(f"релей недоступен или сбой ({e.__class__.__name__}: {e}), повтор через 2 с")
+        except Exception as e:                     # сюда попадают только сбои связи: камера падает через os._exit
+            print(f"релей недоступен ({e.__class__.__name__}: {e}), повтор через 2 с")
             await asyncio.sleep(2)
 
 if __name__ == "__main__":
@@ -79,4 +117,6 @@ if __name__ == "__main__":
     p.add_argument("--far", type=float, default=4.0, help="м, дальше — самый холодный")
     p.add_argument("--quality", type=int, default=70)
     p.add_argument("--filters", action="store_true", help="сглаживание и заполнение дыр (дороже по CPU)")
+    p.add_argument("--watchdog", type=float, default=5, help="с без кадров до перезапуска")
+    p.add_argument("--reset", action="store_true", help="аппаратный сброс камеры при старте")
     asyncio.run(main(p.parse_args()))

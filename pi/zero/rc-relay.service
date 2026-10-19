@@ -5,7 +5,7 @@ After=network.target
 [Service]
 User=pi
 WorkingDirectory=/home/pi/rc
-ExecStart=/usr/bin/python3 -u relay.py --port 8080
+ExecStart=/usr/bin/python3 -u relay.py --port 8080 --map /home/pi/rc/map
 Restart=always
 RestartSec=2
 TimeoutStopSec=3

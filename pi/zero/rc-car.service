@@ -1,0 +1,15 @@
+[Unit]
+Description=RC-багги: камера и ESP8266 по UART, подключение к релею
+After=rc-relay.service
+Requires=rc-relay.service
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/rc
+ExecStartPre=/bin/sleep 2
+ExecStart=/usr/bin/python3 -u pi_car.py --esp /dev/serial0 --rotate180 --url ws://127.0.0.1:8080/ws/car
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

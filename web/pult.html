@@ -210,12 +210,12 @@
     <span id="oVolt" style="color:var(--bad);display:none">ПИТАНИЕ ПРОСЕЛО</span>
   </div>
   <div id="osdQuick">
-    <div class="q"><button data-q="thr" data-d="-50" aria-label="меньше газа">−</button>
-      <div class="val"><span class="lbl">ГАЗ МАКС</span><br><span class="big" id="qThr">—</span><span class="k">1 / 2</span></div>
-      <button data-q="thr" data-d="50" aria-label="больше газа">+</button></div>
-    <div class="q"><button data-q="pwm" data-d="-50" aria-label="слабее руль">−</button>
-      <div class="val"><span class="lbl">РУЛЬ СИЛА</span><br><span class="big" id="qPwm">—</span><span class="k">3 / 4</span></div>
-      <button data-q="pwm" data-d="50" aria-label="сильнее руль">+</button></div>
+    <div class="q"><button data-q="thr" data-d="-10" aria-label="меньше газа">−</button>
+      <div class="val"><span class="lbl">ГАЗ МАКС</span><br><span class="big" id="qThr">—</span><span class="k">1 / 2 · Shift ×5</span></div>
+      <button data-q="thr" data-d="10" aria-label="больше газа">+</button></div>
+    <div class="q"><button data-q="pwm" data-d="-10" aria-label="слабее руль">−</button>
+      <div class="val"><span class="lbl">РУЛЬ СИЛА</span><br><span class="big" id="qPwm">—</span><span class="k">3 / 4 · Shift ×5</span></div>
+      <button data-q="pwm" data-d="10" aria-label="сильнее руль">+</button></div>
   </div>
   <div id="osdCross"></div>
   <div id="osdWarn">FAILSAFE</div>
@@ -245,7 +245,7 @@
 
   <h3>Газ</h3>
   <div class="row"><label for="maxThr">Максимум газа</label><output id="maxThrV"></output>
-    <input type="range" id="maxThr" min="0" max="1000" step="50" data-esp="max">
+    <input type="range" id="maxThr" min="0" max="1000" step="10" data-esp="max">
     <small>Потолок на самой машинке. Начинай с 30–40%.</small></div>
   <div class="row"><label for="acc">Разгон</label><output id="accV"></output>
     <input type="range" id="acc" min="100" max="3000" step="100" data-esp="acc">
@@ -259,7 +259,7 @@
 
   <h3>Руль</h3>
   <div class="row"><label for="pwm">Сила и скорость руля</label><output id="pwmV"></output>
-    <input type="range" id="pwm" min="200" max="1000" step="50" data-esp="pwm">
+    <input type="range" id="pwm" min="200" max="1000" step="10" data-esp="pwm">
     <small>Мощность моторчика руля. Больше — быстрее поворот, но сильнее греется.</small></div>
   <div class="row"><label for="steerExpo">Мягкость у центра</label><output id="steerExpoV"></output>
     <input type="range" id="steerExpo" min="0" max="100" step="5" data-local>
@@ -471,12 +471,12 @@ function qShow(){
 }
 $$('#osdQuick button').forEach(b => {
   b.addEventListener('pointerdown', e => e.stopPropagation());
-  b.addEventListener('click', () => qStep(b.dataset.q, +b.dataset.d));
+  b.addEventListener('click', e => qStep(b.dataset.q, +b.dataset.d * (e.shiftKey ? 5 : 1)));
 });
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
-  const k = {Digit1: ['thr', -50], Digit2: ['thr', 50], Digit3: ['pwm', -50], Digit4: ['pwm', 50]}[e.code];
-  if (k) { qStep(...k); e.preventDefault(); }
+  const k = {Digit1: ['thr', -10], Digit2: ['thr', 10], Digit3: ['pwm', -10], Digit4: ['pwm', 10]}[e.code];
+  if (k) { qStep(k[0], k[1] * (e.shiftKey ? 5 : 1)); e.preventDefault(); }      // шаг 1%, с Shift — 5%
 });
 function osdTele(m){
   qShow();

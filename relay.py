@@ -22,6 +22,7 @@ class Hub:
         self.pilots = set()                                # пульты, объявившие себя автопилотом
         self.stats = {"frames": 0, "bytes": 0, "since": time.time()}
         self.last_cmd = {"steer": 0.0, "throttle": 0.0}   # с чем спаривать кадр
+        self.driver, self.driver_at = None, 0.0            # пульт, который сейчас реально рулит
         self.rec = None                                    # {dir, log, n}
 
     # --- запись датасета для имитационного обучения -------------------------
@@ -119,6 +120,14 @@ async def ws_pult(request):
                     and not m.get("steer") and not m.get("throttle")):
                 continue
             if m.get("type", "cmd") == "cmd":
+                # Несколько открытых пультов (вкладки, телефон + ПК) шлют сердцебиение нулями
+                # и перебивают того, кто рулит. Нули от остальных глушим секунду после
+                # последней ненулевой команды водителя.
+                now = time.time()
+                if m.get("steer") or m.get("throttle"):
+                    hub.driver, hub.driver_at = ws, now
+                elif hub.driver is not None and ws is not hub.driver and now - hub.driver_at < 1.0:
+                    continue
                 hub.last_cmd = m
             if hub.car is not None:
                 await hub.car.send_str(msg.data)        # команда на борт

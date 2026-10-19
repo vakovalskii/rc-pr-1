@@ -28,6 +28,31 @@
   #novideo{position:fixed;inset:0;display:grid;place-items:center;color:var(--faint);font-size:14px;pointer-events:none}
   #novideo.hide{display:none}
 
+  /* второе окно: камера глубины */
+  #depthPane{position:fixed;display:none;background:#07080a}
+  #depthPane img{width:100%;height:100%;object-fit:contain;display:block}
+  body.split #view{right:auto;width:50%}
+  body.split #depthPane{display:block;top:0;bottom:0;left:50%;right:0;border-left:2px solid #000}
+  @media (orientation:portrait){
+    body.split #view{width:100%;height:50%;bottom:auto}
+    body.split #depthPane{left:0;top:50%;border-left:0;border-top:2px solid #000}
+  }
+  body.split #osdCross{left:25%} @media (orientation:portrait){ body.split #osdCross{left:50%;top:25%} }
+  #dInfo{position:absolute;left:0;right:0;top:calc(env(safe-area-inset-top) + 58px);text-align:center;pointer-events:none;
+    font:600 14px/1.3 var(--mono);color:#f4f2ec;text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 4px #000}
+  #dInfo .lbl{color:#cfcabd;font-size:11px;font-weight:700;letter-spacing:.08em}
+  #dAhead{font-size:30px;display:block}
+  #dAhead.near{color:var(--bad)} #dAhead.mid{color:var(--warn)}
+  #dBox{position:absolute;left:33.3%;width:33.3%;top:30%;height:45%;border:2px dashed #ffffff8c;pointer-events:none}
+  #dOff{position:absolute;inset:0;display:grid;place-items:center;color:var(--faint);font-size:14px}
+
+  @media (orientation:portrait) and (max-width:600px){
+    #osdTL,#osdTR,#osdThr,#osdThrV,.hint,#state{display:none!important}
+    #top{gap:5px;padding-left:8px;padding-right:8px} #top .btn{padding:0 7px;font-size:12px;min-width:0} #top .pill{padding:0 9px;font-size:12px} #link{display:none}
+    #osdQuick{gap:10px;top:calc(env(safe-area-inset-top) + 54px)} #osdQuick button{width:34px}
+    .stick{width:132px;height:132px;margin-left:-66px} #padT .stick{left:28%} #padS .stick{left:72%}
+  }
+
   /* верхняя панель */
   #top{position:fixed;z-index:20;top:0;left:0;right:0;display:flex;align-items:center;gap:10px;
     padding:calc(env(safe-area-inset-top) + 10px) calc(env(safe-area-inset-right) + 12px) 10px calc(env(safe-area-inset-left) + 12px);
@@ -149,6 +174,9 @@
 <body>
 <img id="view" alt="">
 <div id="novideo">ждём видео с машинки…</div>
+<div id="depthPane"><img id="depthImg" alt=""><div id="dBox"></div>
+  <div id="dInfo"><span class="lbl">ВПЕРЕДИ</span><span id="dAhead">—</span><span id="dMeta"></span></div>
+  <div id="dOff">камера глубины не на связи</div></div>
 
 <div id="top">
   <div class="pill"><span class="dot" id="dot"></span><b id="link">нет связи</b></div>
@@ -161,6 +189,7 @@
   <span class="grow"></span>
   <button class="btn" id="gpBtn" style="display:none" title="геймпад подключён">геймпад</button>
   <button class="btn" id="resetBtn" style="display:none" title="на старт (R)">↺ старт</button>
+  <button class="btn" id="depthBtn" title="второе окно: камера глубины (G)">глубина</button>
   <button class="btn on" id="osdBtn" title="показания поверх видео (O)">OSD</button>
   <button class="btn" data-open="tele">телеметрия</button>
   <button class="btn" data-open="set">настройки</button>
@@ -469,6 +498,38 @@ function osdTele(m){
 }
 setInterval(() => { $('#oFps').textContent = $('#fps').textContent + ' к/с'; }, 1000);
 (function loop(){ osdTick(); requestAnimationFrame(loop); })();
+
+// ---------- второе окно: камера глубины ----------
+let splitOn = false; try { splitOn = localStorage.getItem('split') === '1'; } catch {}
+function setSplit(v){ splitOn = v; document.body.classList.toggle('split', v); $('#depthBtn').classList.toggle('on', v);
+  try { localStorage.setItem('split', v ? '1' : '0'); } catch {} }
+setSplit(splitOn);
+$('#depthBtn').addEventListener('click', () => setSplit(!splitOn));
+addEventListener('keydown', e => { if (e.code === 'KeyG' && e.target.tagName !== 'INPUT') setSplit(!splitOn); });
+let dws, dBusy = false, dLast = 0, dSeen = false;
+function depthConnect(){
+  dws = new WebSocket(`ws://${location.host}/ws/depthview`); dws.binaryType = 'arraybuffer';
+  dws.onclose = () => setTimeout(depthConnect, 1500);
+  dws.onmessage = e => {
+    if (typeof e.data !== 'string') {
+      dLast = performance.now(); $('#dOff').style.display = 'none';
+      if (!dSeen) { dSeen = true; if (localStorage.getItem('split') === null) setSplit(true); }   // первый раз сами открываем окно
+      if (dBusy) return; dBusy = true;
+      const url = URL.createObjectURL(new Blob([e.data], {type: 'image/jpeg'})), img = $('#depthImg'), old = img.src;
+      img.onload = () => { dBusy = false; if (old.startsWith('blob:')) URL.revokeObjectURL(old); };
+      img.onerror = () => { dBusy = false; };
+      img.src = url; return;
+    }
+    const m = JSON.parse(e.data); if (m.type !== 'depth') return;
+    if (m.online === false) { $('#dOff').style.display = ''; return; }
+    const a = m.ahead, el = $('#dAhead');
+    el.textContent = a == null ? 'свободно' : a.toFixed(2) + ' м';
+    el.className = a == null ? '' : a < 0.5 ? 'near' : a < 1.0 ? 'mid' : '';
+    $('#dMeta').textContent = `центр ${m.center == null ? '—' : m.center.toFixed(2) + ' м'} · ${m.fps} к/с · USB ${m.usb}`;
+  };
+}
+depthConnect();
+setInterval(() => { if (performance.now() - dLast > 3000) $('#dOff').style.display = ''; }, 1000);
 
 // ---------- панели ----------
 function closeDrawers(){ $$('.drawer').forEach(d => d.classList.remove('open')); $('#scrim').classList.remove('on');

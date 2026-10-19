@@ -1,0 +1,82 @@
+"""
+Камера глубины RealSense (D455 на Pi 4) -> релей -> пульт вторым окном.
+
+    ~/rs-venv/bin/python depth_cam.py --url ws://192.168.1.137:8080/ws/depth
+
+Шлёт два вида сообщений:
+  * JPEG раскрашенной глубины (ближе — тёплое, дальше — холодное), по кадру в пути, без очереди;
+  * JSON {"type":"depth", "center": м, "ahead": м, ...} — расстояние в центре кадра и
+    до ближайшего препятствия в полосе по курсу (центральная треть ширины, средняя часть высоты).
+
+pyrealsense2 под Python 3.13 (trixie) колёс нет — запускается из venv на Python 3.12 (uv).
+"""
+import argparse, asyncio, io, json, time
+import numpy as np
+import pyrealsense2 as rs
+from PIL import Image
+
+def open_camera(a):
+    pipe, cfg = rs.pipeline(), rs.config()
+    cfg.enable_stream(rs.stream.depth, a.width, a.height, rs.format.z16, a.fps)
+    prof = pipe.start(cfg)
+    dev = prof.get_device()
+    scale = dev.first_depth_sensor().get_depth_scale()
+    usb = dev.get_info(rs.camera_info.usb_type_descriptor)
+    print(f"RealSense {dev.get_info(rs.camera_info.name)}, USB {usb}, глубина {a.width}x{a.height}@{a.fps}")
+    return pipe, scale, usb
+
+def colorize(z, near, far):
+    """Своя палитра без OpenCV: близко — красный/оранжевый, далеко — синий, нет данных — чёрный."""
+    t = np.clip((z - near) / (far - near), 0, 1)
+    r = np.clip(1.6 - 2.2 * t, 0, 1); g = np.clip(1.2 - np.abs(t - .45) * 2.6, 0, 1); b = np.clip(2.0 * t - .4, 0, 1)
+    rgb = (np.stack([r, g, b], -1) * 255).astype(np.uint8)
+    rgb[z <= 0] = (12, 14, 18)
+    return rgb
+
+def grab(pipe, scale, a, filt):
+    fs = pipe.wait_for_frames(2000)
+    d = fs.get_depth_frame()
+    for f in filt: d = f.process(d)
+    z = np.asanyarray(d.get_data()).astype(np.float32) * scale
+    h, w = z.shape
+    c = z[h // 2 - 4:h // 2 + 4, w // 2 - 4:w // 2 + 4]; c = c[c > 0]
+    band = z[int(h * .30):int(h * .75), w // 3:2 * w // 3]; band = band[(band > a.near) & (band < a.far)]
+    stats = {"type": "depth", "online": True,
+             "center": round(float(np.median(c)), 2) if c.size else None,
+             "ahead": round(float(np.percentile(band, 3)), 2) if band.size > 50 else None,   # 3-й перцентиль: шум не считаем препятствием
+             "valid": round(float((z > 0).mean()), 2), "w": w, "h": h}
+    buf = io.BytesIO(); Image.fromarray(colorize(z, a.near, a.far)).save(buf, "JPEG", quality=a.quality)
+    return buf.getvalue(), stats
+
+async def main(a):
+    import websockets
+    pipe, scale, usb = open_camera(a)
+    filt = [rs.spatial_filter(), rs.temporal_filter(), rs.hole_filling_filter(1)] if a.filters else []
+    loop = asyncio.get_running_loop()
+    while True:
+        try:
+            try: ws = await websockets.connect(a.url, max_size=8 << 20, proxy=None, open_timeout=5)
+            except TypeError: ws = await websockets.connect(a.url, max_size=8 << 20, open_timeout=5)
+            print(f"на связи с {a.url}")
+            n, t0 = 0, time.time()
+            while True:
+                jpeg, stats = await loop.run_in_executor(None, grab, pipe, scale, a, filt)
+                n += 1
+                stats["fps"] = round(n / max(time.time() - t0, 1e-3), 1); stats["usb"] = usb
+                if time.time() - t0 > 5: n, t0 = 0, time.time()
+                await ws.send(jpeg); await ws.send(json.dumps(stats))
+        except Exception as e:
+            print(f"релей недоступен или сбой ({e.__class__.__name__}: {e}), повтор через 2 с")
+            await asyncio.sleep(2)
+
+if __name__ == "__main__":
+    p = argparse.ArgumentParser()
+    p.add_argument("--url", default="ws://192.168.1.137:8080/ws/depth")
+    p.add_argument("--width", type=int, default=640)
+    p.add_argument("--height", type=int, default=480)
+    p.add_argument("--fps", type=int, default=15)
+    p.add_argument("--near", type=float, default=0.3, help="м, ближе — самый тёплый цвет")
+    p.add_argument("--far", type=float, default=4.0, help="м, дальше — самый холодный")
+    p.add_argument("--quality", type=int, default=70)
+    p.add_argument("--filters", action="store_true", help="сглаживание и заполнение дыр (дороже по CPU)")
+    asyncio.run(main(p.parse_args()))

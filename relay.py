@@ -138,6 +138,42 @@ async def ws_pult(request):
             await hub.to_pults(json.dumps({"type": "pilot", "online": bool(hub.pilots)}))
     return ws
 
+# --- камера глубины (RealSense на отдельной малине): свой поток, пульт показывает вторым окном
+depth_viewers, depth_busy = set(), set()
+
+async def _depth_send(ws, data, binary):
+    depth_busy.add(ws)
+    try: await (ws.send_bytes(data) if binary else ws.send_str(data))
+    except Exception: depth_viewers.discard(ws)
+    finally: depth_busy.discard(ws)
+
+async def ws_depth(request):                       # источник: depth_cam.py на Pi 4
+    ws = web.WebSocketResponse(max_msg_size=8 << 20)
+    await ws.prepare(request)
+    print("[depth] камера глубины подключилась")
+    try:
+        async for msg in ws:
+            binary = msg.type == WSMsgType.BINARY
+            if not binary and msg.type != WSMsgType.TEXT: continue
+            for v in list(depth_viewers):
+                if binary and v in depth_busy: continue     # медленный зритель: кадр пропускаем, очередь не копим
+                asyncio.ensure_future(_depth_send(v, msg.data, binary))
+    finally:
+        print("[depth] камера глубины отвалилась")
+        for v in list(depth_viewers):
+            asyncio.ensure_future(_depth_send(v, json.dumps({"type": "depth", "online": False}), False))
+    return ws
+
+async def ws_depthview(request):                   # зрители: пульты
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    depth_viewers.add(ws)
+    try:
+        async for _ in ws: pass
+    finally:
+        depth_viewers.discard(ws)
+    return ws
+
 async def index(request):
     return web.FileResponse(WEB / "pult.html")
 
@@ -179,6 +215,8 @@ def make_app(map_dir=None):
         web.get("/rec/stop", rec_stop),
         web.get("/ws/car", ws_car),
         web.get("/ws/pult", ws_pult),
+        web.get("/ws/depth", ws_depth),
+        web.get("/ws/depthview", ws_depthview),
         web.static("/web", WEB),
     ]
     if map_dir:                                  # карта полигона для минимапы и /map.html

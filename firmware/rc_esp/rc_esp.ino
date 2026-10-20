@@ -83,11 +83,10 @@ void control() {
   uint32_t now = millis();
   failsafe = now - lastCmdMs > FAILSAFE_MS;
   int target = failsafe ? 0 : constrain((int)cmdThr, -(int)cfg.maxThr, (int)cfg.maxThr);
-  // смена направления: сначала до нуля, нейтраль FLIP_HOLD_MS, потом в другую сторону
+  // смена направления = тормоз: ехал вперёд и дал назад — газ сразу в ноль и разгон назад (и наоборот).
+  // Регулятор у нас «вперёд/назад» без тормоза, обратный ход колёс и есть торможение. Без нейтральной паузы.
   int tsign = (target > 0) - (target < 0);
-  if (tsign && lastSign && tsign != lastSign) {
-    if (thrOut != 0 || now - zeroSince < FLIP_HOLD_MS) target = 0;
-  }
+  if (tsign && thrOut != 0 && (tsign > 0) != (thrOut > 0)) thrOut = 0;
   // активный тормоз: газ вперёд отпустили (или потянули назад, или failsafe) — регулятору на brakeMs импульс
   // «назад» силой brakeUs: автомобильный регулятор после хода вперёд понимает его как тормоз, а не задний ход.
   // Без него машинка просто катится (накат ~20 см на 18%).

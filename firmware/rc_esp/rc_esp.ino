@@ -10,8 +10,9 @@
 //   D6 (GPIO12) -> IN2 драйвера моторчика руля
 //   A0          <- движок потенциометра сервы (крайние на 3V3 и GND, не 5 В!)
 //
-// Руль 5-проводной сервы: режим 0 выкл, 1 ручной (стик = ШИМ моторчика,
-// чтобы проверить провода), 2 по потенциометру (после калибровки).
+// Руль 5-проводной сервы: режим 0 выкл, 1 ручной (стик = ШИМ моторчика; отпустил стик —
+// после калибровки колёса сами доезжают в центр по потенциометру), 2 по потенциометру
+// (стик = угол колёс).
 //
 // Протокол (текстом, строка на команду; одинаково по WebSocket и USB):
 //   c,<id>,<руль -1000..1000>,<газ -1000..1000>    команда, 20 Гц
@@ -51,6 +52,7 @@ Servo esc;
 int16_t cmdSteer = 0, cmdThr = 0;
 int32_t lastId = -1;
 uint32_t lastCmdMs = 0, stallSince = 0, stallBlockUntil = 0;
+const int CENTER_DB = 30;                                    // |стик| < 3% — «отпустил руль»
 bool failsafe = true;
 int pot = 0, motorOut = 0, escUs = 1500;
 float thrOut = 0;                                          // газ после рампы, -1000..1000
@@ -89,17 +91,24 @@ void control() {
 
   pot = readPot();
   int steer = failsafe ? 0 : cmdSteer, out = 0;
-  if (cfg.mode == 1 && !failsafe) {
+  bool hold = false; int aim = 0;
+  if (cfg.mode == 1 && !failsafe && abs(steer) >= CENTER_DB) {
     out = (long)steer * cfg.maxPwm / 1000;                  // ручной: стик прямо в моторчик
+  } else if (cfg.mode == 1 && calibrated()) {
+    hold = true; aim = cfg.potC;                          // ручной, стик отпущен (или failsafe) — колёса сами прямо
   } else if (cfg.mode == 2 && calibrated()) {
     // цель на потенциометре; работает при любом направлении шкалы (L>R или L<R)
     int span = steer > 0 ? cfg.potR - cfg.potC : cfg.potC - cfg.potL;
-    int target = cfg.potC + (long)span * steer / 1000;
-    int err = target - pot;
+    hold = true; aim = cfg.potC + (long)span * steer / 1000;
+  }
+  if (hold) {
+    // знак: «+» у моторчика (до inv) — это вправо, как у стика; вправо потенциометр идёт к potR
+    int dir = cfg.potR > cfg.potL ? 1 : -1;
+    int err = aim - pot;
     int lo = min(cfg.potL, cfg.potR) - 30, hi = max(cfg.potL, cfg.potR) + 30;
     if (pot < lo || pot > hi) out = 0;                      // вылет за упоры: провода или знак не те
     else if (abs(err) > cfg.db) {
-      out = constrain(err * cfg.kp, -(int)cfg.maxPwm, (int)cfg.maxPwm);
+      out = constrain(err * cfg.kp, -(int)cfg.maxPwm, (int)cfg.maxPwm) * dir;
       if (abs(out) < cfg.minPwm) out = out > 0 ? cfg.minPwm : -cfg.minPwm;
     }
     if (out != 0) {                                          // крутим долго и не доезжаем — бережём моторчик
@@ -107,7 +116,7 @@ void control() {
       if (now - stallSince > 1500) { stallBlockUntil = now + 1000; stallSince = 0; }
     } else stallSince = 0;
     if (now < stallBlockUntil) out = 0;
-  }
+  } else stallSince = 0;
   if (cfg.inv) out = -out;
   setMotor(out);
   digitalWrite(PIN_LED, failsafe ? HIGH : LOW);             // горит = есть команды

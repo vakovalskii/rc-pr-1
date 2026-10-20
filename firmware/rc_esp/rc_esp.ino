@@ -41,7 +41,7 @@ const uint32_t MAGIC = 0xB0661E03;
 Cfg cfg;
 
 // accMs/brkMs: за сколько мс газ прошёл бы всю шкалу 0..100% при разгоне и при торможении
-void cfgDefaults() { cfg = {MAGIC, -1, -1, -1, 0, 0, 300, 4, 12, 700, 250, 600, 1500, 150, 300}; }
+void cfgDefaults() { cfg = {MAGIC, -1, -1, -1, 0, 0, 300, 4, 12, 700, 250, 600, 1500, 200, 300}; }
 void cfgLoad() {
   EEPROM.begin(64); EEPROM.get(0, cfg);
   if (cfg.magic != MAGIC) cfgDefaults();
@@ -87,23 +87,22 @@ void control() {
   // Регулятор у нас «вперёд/назад» без тормоза, обратный ход колёс и есть торможение. Без нейтральной паузы.
   int tsign = (target > 0) - (target < 0);
   if (tsign && thrOut != 0 && (tsign > 0) != (thrOut > 0)) thrOut = 0;
-  // активный тормоз: газ вперёд отпустили (или потянули назад, или failsafe) — регулятору на brakeMs импульс
-  // «назад» силой brakeUs: автомобильный регулятор после хода вперёд понимает его как тормоз, а не задний ход.
-  // Без него машинка просто катится (накат ~20 см на 18%).
+  // тормоз противоходом: ехал вперёд и потянул «назад» — регулятору сразу, без рампы, «назад» силой brakeUs
+  // (может быть больше потолка газа) на brakeMs × (оценка скорости / потолок газа), дальше обычный задний ход.
+  // Просто отпустил газ — тормоза нет, машинка катится накатом.
   // Датчика скорости нет, поэтому скорость оцениваем по газу: машинка разгоняется к скорости, пропорциональной
-  // газу, примерно за SPEED_TAU_MS. Тормоз длится brakeMs × (оценка скорости / потолок газа): короткий проезд —
-  // короткий тормоз. Регулятор у нас «вперёд/назад» без тормоза, и лишний импульс он выполняет как задний ход.
+  // газу, примерно за SPEED_TAU_MS.
   speedEst += (max(thrOut, 0.0f) - speedEst) * 10.0f / SPEED_TAU_MS;   // такт control() — 10 мс
-  if (cfg.brakeUs > 0 && cfg.brakeMs > 0 && target <= 0 && speedEst > 25 && !brakeUntil) {
+  if (cfg.brakeUs > 0 && cfg.brakeMs > 0 && target < 0 && speedEst > 25 && !brakeUntil) {
     float k = min(1.0f, speedEst / max((float)cfg.maxThr, 1.0f));
     brakeUntil = now + max((uint32_t)1, (uint32_t)(cfg.brakeMs * k)); thrOut = 0; speedEst = 0;
   }
   bool braked = false;
   if (brakeUntil) {
-    if (target > 0 || now >= brakeUntil) { brakeUntil = 0; zeroSince = now; }   // снова газ — тормоз снят; отжали — нейтраль
+    if (target >= 0 || now >= brakeUntil) { brakeUntil = 0; zeroSince = now; }  // отпустил «назад» или дал газ — тормоз снят
     else {
       escUs = 1500 - cfg.brakeUs; esc.writeMicroseconds(escUs);
-      lastSign = 1; zeroSince = now; braked = true;        // после тормоза задний ход — как обычно, через нейтраль
+      lastSign = -1; thrOut = 0; braked = true;            // после тормоза задний ход — с нуля по рампе
     }
   }
   if (!braked) {

@@ -34,9 +34,12 @@
   #empty b{color:var(--fg)}
   #help{position:fixed;left:calc(env(safe-area-inset-left) + 12px);bottom:calc(env(safe-area-inset-bottom) + 10px);color:var(--faint);font-size:12px}
   .lag-bad{color:var(--warn)}
-  body.embed #bar{top:auto;right:auto;bottom:calc(env(safe-area-inset-bottom) + 60px);max-width:62%;padding:0 0 0 12px;
-    gap:6px;background:none;flex-wrap:wrap-reverse}
+  body.embed #bar{top:var(--bar-top,60px);right:auto;max-width:calc(100% - 190px);padding:0 8px;gap:6px;background:none}
   body.embed .sp{display:none}
+  @media (max-width:700px){                                         /* узкое окно в пульте (телефон) */
+    body.embed .pill{display:none} body.embed #ptsPill{display:flex} body.embed #bar{max-width:none}
+    body.embed .btn{min-height:28px;padding:4px 8px;font-size:12px}
+  }
   body.embed .pill{padding:4px 8px;font-size:13px} body.embed .btn{min-height:32px;padding:5px 10px;font-size:13px}
   body.embed #help, body.embed .full{display:none}
   .legend{display:flex;gap:10px;align-items:center;font-size:12px;color:var(--dim)}
@@ -46,7 +49,7 @@
 <body>
 <div id="bar">
   <div class="pill"><span class="dot" id="dot"></span><span id="link">нет связи</span></div>
-  <div class="pill"><span class="k">точек</span><b class="num" id="pts">0</b></div>
+  <div class="pill" id="ptsPill"><span class="k">точек</span><b class="num" id="pts">0</b></div>
   <div class="pill"><span class="k">кадров</span><b class="num" id="frames">0</b><span class="k">потеряно</span><b class="num" id="lost">0</b></div>
   <div class="pill"><span class="k">путь</span><b class="num" id="path">0.0</b><span class="k">м</span></div>
   <div class="pill"><span class="k">SLAM</span><b class="num" id="fps">—</b><span class="k">к/с ·</span><b class="num" id="lag">—</b><span class="k">мс</span></div>
@@ -67,6 +70,9 @@ const $ = s => document.querySelector(s);
 const EMBED = new URLSearchParams(location.search).has('embed');   // окно внутри пульта
 if (EMBED) {
   document.body.classList.add('embed');
+  addEventListener('message', e => {                               // пульт говорит, где кончаются его вкладки
+    if (e.data && e.data.type === 'barTop') document.body.style.setProperty('--bar-top', e.data.top + 'px');
+  });
   // фокус в окне карты не должен отнимать управление: клавиши уходят в пульт
   for (const t of ['keydown', 'keyup']) addEventListener(t, e => {
     if (['KeyF', 'KeyT', 'KeyC', 'KeyP'].includes(e.code)) return;   // свои клавиши карты

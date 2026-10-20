@@ -268,8 +268,17 @@ async def rec_stop(request):
     hub.rec_stop()
     return web.json_response({"stopped": True, "frames": n})
 
+@web.middleware
+async def no_cache(request, handler):
+    """Страницы и карта всегда свежие: после выкладки телефон не должен показывать старый пульт из кэша."""
+    resp = await handler(request)
+    path = request.path
+    if path == "/" or path.endswith((".html", ".json", ".png")) and not path.startswith("/models"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
 def make_app(map_dir=None):
-    app = web.Application()
+    app = web.Application(middlewares=[no_cache])
     routes = [
         web.get("/", index),
         web.get("/map.html", map_page),

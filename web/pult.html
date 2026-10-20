@@ -181,6 +181,37 @@
   #osdQuick .val{min-width:64px;text-align:center}
   #osdQuick .k{display:none;color:#cfcabd;font-size:10px} @media (hover:hover){ #osdQuick .k{display:block} }
 
+  /* окно карты открыто: джойстики — квадраты в нижних углах, остальное окно карты крутится пальцем/мышью */
+  .sm{display:none}
+  body.m3d #pads{pointer-events:none}
+  body.m3d .pad{position:absolute;bottom:0;flex:none;width:min(300px,42vw);height:min(300px,56vh);pointer-events:auto}
+  body.m3d #padT{left:0} body.m3d #padS{right:0}
+  body.m3d #padT .stick, body.m3d #padS .stick{left:50%}
+  body.m3d .hint{display:none}
+
+  /* телефон: iPhone 16 — 852×393 лёжа (в Safari ~852×370), 393×852 стоя (~393×660) */
+  @media (max-height:460px), (max-width:600px){
+    .lg{display:none} .sm{display:inline}
+    #top{gap:6px;padding-top:calc(env(safe-area-inset-top) + 6px);padding-bottom:6px}
+    #top .btn{height:30px;padding:0 9px;font-size:12px;min-width:34px} #top .pill{height:30px;padding:0 9px;font-size:12px}
+    #state,#link{display:none}
+    #osdQuick{top:calc(env(safe-area-inset-top) + 42px);gap:8px}
+    #osdQuick button{width:30px;height:28px;font-size:15px} #osdQuick .val{min-width:46px} #osd .big{font-size:15px}
+    .stick{width:118px;height:118px;margin-left:-59px;bottom:calc(env(safe-area-inset-bottom) + 12px)}
+    .knob{width:46px;height:46px;margin:-23px 0 0 -23px}
+    .readout,.hint{display:none}
+    #osdSteer{bottom:calc(env(safe-area-inset-bottom) + 10px)} #osdSteerV{bottom:calc(env(safe-area-inset-bottom) + 24px)}
+    #paneCtl{left:8px;top:calc(env(safe-area-inset-top) + 86px);gap:6px}
+    #paneTabs button{padding:7px 10px;font-size:12px} #recBtn{padding:7px 10px;font-size:12px}
+    #dInfo{top:calc(env(safe-area-inset-top) + 124px);font-size:11px} #dAhead{font-size:22px}
+    body.split #osdTR, body.split #mini{display:none!important}
+    body.m3d .pad{width:min(170px,45vw);height:min(170px,45vh)}
+  }
+  @media (orientation:portrait) and (max-width:600px){
+    #paneCtl{top:8px} #dInfo{top:46px}
+    #osdQuick{top:calc(env(safe-area-inset-top) + 44px)}
+  }
+
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -189,7 +220,7 @@
 <div id="novideo">ждём видео с машинки…</div>
 <div id="depthPane"><img id="depthImg" alt=""><div id="dBox"></div>
   <iframe id="map3dFrame" title="живая 3D-карта"></iframe>
-  <div id="paneCtl"><div id="paneTabs"><button id="tabDepth" class="on">глубина</button><button id="tabMap">3D-карта</button></div>
+  <div id="paneCtl"><div id="paneTabs"><button id="tabDepth" class="on">глубина</button><button id="tabMap"><span class="lg">3D-карта</span><span class="sm">3D</span></button></div>
   <button id="recBtn" disabled title="запись глубины и цвета для 3D-карты (SLAM)"><span class="rd">●</span> <span id="recTxt">запись 3D</span></button></div>
   <div id="dInfo"><span class="lbl">ВПЕРЕДИ</span><span id="dAhead">—</span><span id="dMeta"></span></div>
   <div id="dOff">камера глубины не на связи</div></div>
@@ -205,11 +236,11 @@
   <span class="grow"></span>
   <button class="btn" id="gpBtn" style="display:none" title="геймпад подключён">геймпад</button>
   <button class="btn" id="resetBtn" style="display:none" title="на старт (R)">↺ старт</button>
-  <button class="btn" id="depthBtn" title="второе окно: камера глубины (G)">глубина</button>
-  <button class="btn" id="mapBtn" title="правое окно: живая 3D-карта и проходимость (M)">3D-карта</button>
+  <button class="btn" id="depthBtn" title="второе окно: камера глубины (G)"><span class="lg">глубина</span><span class="sm">глуб</span></button>
+  <button class="btn" id="mapBtn" title="правое окно: живая 3D-карта и проходимость (M)"><span class="lg">3D-карта</span><span class="sm">3D</span></button>
   <button class="btn on" id="osdBtn" title="показания поверх видео (O)">OSD</button>
-  <button class="btn" data-open="tele">телеметрия</button>
-  <button class="btn" data-open="set">настройки</button>
+  <button class="btn" data-open="tele" title="телеметрия"><span class="lg">телеметрия</span><span class="sm">тлм</span></button>
+  <button class="btn" data-open="set" title="настройки"><span class="lg">настройки</span><span class="sm">⚙</span></button>
 </div>
 
 <div id="osd">
@@ -228,10 +259,10 @@
   </div>
   <div id="osdQuick">
     <div class="q"><button data-q="thr" data-d="-10" aria-label="меньше газа">−</button>
-      <div class="val"><span class="lbl">ГАЗ МАКС</span><br><span class="big" id="qThr">—</span><span class="k">1 / 2 · Shift ×5</span></div>
+      <div class="val"><span class="lbl"><span class="lg">ГАЗ МАКС</span><span class="sm">ГАЗ</span></span><br><span class="big" id="qThr">—</span><span class="k">1 / 2 · Shift ×5</span></div>
       <button data-q="thr" data-d="10" aria-label="больше газа">+</button></div>
     <div class="q"><button data-q="pwm" data-d="-10" aria-label="слабее руль">−</button>
-      <div class="val"><span class="lbl">РУЛЬ СИЛА</span><br><span class="big" id="qPwm">—</span><span class="k">3 / 4 · Shift ×5</span></div>
+      <div class="val"><span class="lbl"><span class="lg">РУЛЬ СИЛА</span><span class="sm">РУЛЬ</span></span><br><span class="big" id="qPwm">—</span><span class="k">3 / 4 · Shift ×5</span></div>
       <button data-q="pwm" data-d="10" aria-label="сильнее руль">+</button></div>
   </div>
   <div id="osdCross"></div>
@@ -524,7 +555,7 @@ setInterval(() => { $('#oFps').textContent = $('#fps').textContent + ' к/с · 
 
 // ---------- второе окно: камера глубины ----------
 let splitOn = false; try { splitOn = localStorage.getItem('split') === '1'; } catch {}
-function setSplit(v){ splitOn = v; document.body.classList.toggle('split', v); $('#depthBtn').classList.toggle('on', v);
+function setSplit(v){ splitOn = v; document.body.classList.toggle('split', v); $('#depthBtn').classList.toggle('on', v); syncM3d();
   try { localStorage.setItem('split', v ? '1' : '0'); } catch {} }
 setSplit(splitOn);
 $('#depthBtn').addEventListener('click', () => setSplit(!splitOn));
@@ -568,12 +599,23 @@ depthConnect();
 let paneTab = 'depth'; try { paneTab = localStorage.getItem('paneTab') || 'depth'; } catch {}
 function setTab(t){
   paneTab = t; const m = t === 'map';
-  if (m && !$('#map3dFrame').src) $('#map3dFrame').src = '/map3d.html?embed=1';     // грузим только когда нужна
+  if (m && !$('#map3dFrame').src) $('#map3dFrame').src = '/map3d.html?embed=1&v=' + Date.now();     // грузим только когда нужна
   $('#depthPane').classList.toggle('m3d', m);
   $('#tabDepth').classList.toggle('on', !m); $('#tabMap').classList.toggle('on', m);
   $('#mapBtn').classList.toggle('on', m && splitOn);
   try { localStorage.setItem('paneTab', t); } catch {}
+  syncM3d();
 }
+// карте: панель ставить сразу под вкладками (в координатах окна карты)
+function barTop(){ const c = $('#paneCtl'); return c.offsetTop + c.offsetHeight + 8; }
+function syncM3d(){
+  try {
+    document.body.classList.toggle('m3d', splitOn && paneTab === 'map');
+    const f = $('#map3dFrame'); if (f.contentWindow) f.contentWindow.postMessage({type: 'barTop', top: barTop()}, '*');
+  } catch {}                                                        // setSplit зовёт до объявления paneTab
+}
+$('#map3dFrame').addEventListener('load', syncM3d);
+addEventListener('resize', syncM3d);
 $('#tabDepth').onclick = () => setTab('depth');
 $('#tabMap').onclick = () => setTab('map');
 $('#mapBtn').onclick = () => { if (splitOn && paneTab === 'map') { setSplit(false); setTab('map'); } else { setSplit(true); setTab('map'); } };

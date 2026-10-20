@@ -222,7 +222,7 @@ async def main(a):
             except TypeError: ws = await websockets.connect(a.url, max_size=8 << 20, open_timeout=5)
             print(f"на связи с {a.url}")
             if a.serve: await ws.send(json.dumps({"type": "depthsrc", "port": a.serve}))
-            n, t0 = 0, time.time()
+            n, t0, view_at = 0, time.time(), 0.0
             while True:
                 jpeg, stats, rawmsg = await loop.run_in_executor(None, grab_checked, pipe, scale, a, filt)
                 js_raw = None
@@ -235,7 +235,9 @@ async def main(a):
                 stats["fps"] = round(n / max(time.time() - t0, 1e-3), 1); stats["usb"] = usb
                 if time.time() - t0 > 5: n, t0 = 0, time.time()
                 js = json.dumps(stats)
-                if a.serve: to_viewers(jpeg, js); await ws.send(js)       # через релей — только цифры
+                if a.serve:                                # картинку зрителям — не чаще view_fps: эфир 2.4 ГГц не резиновый
+                    if time.time() - view_at >= 1 / a.view_fps: to_viewers(jpeg, js); view_at = time.time()
+                    await ws.send(js)                      # через релей — только цифры
                 else: await ws.send(jpeg); await ws.send(js)
         except Exception as e:                     # сюда попадают только сбои связи: камера падает через os._exit
             print(f"релей недоступен ({e.__class__.__name__}: {e}), повтор через 2 с")
@@ -254,6 +256,7 @@ if __name__ == "__main__":
     p.add_argument("--watchdog", type=float, default=5, help="с без кадров до перезапуска")
     p.add_argument("--serve", type=int, default=0, help="порт: отдавать кадры пультам напрямую, релею — только адрес и цифры")
     p.add_argument("--color", action="store_true", help="включить цветную камеру и запись для SLAM по флагу ~/rc/rec.on")
+    p.add_argument("--view-fps", type=float, default=8, help="к/с картинки глубины пультам (цифры — каждый кадр)")
     p.add_argument("--raw-fps", type=float, default=4, help="к/с уменьшенных RGBD-пар для живой 3D-карты (live_slam.py)")
     p.add_argument("--pitch", type=float, default=25, help="°, камера смотрит вверх (для профиля препятствий)")
     p.add_argument("--cam-height", type=float, default=0.10, help="м, высота камеры над полом")

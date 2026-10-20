@@ -555,7 +555,7 @@ setInterval(() => { $('#oFps').textContent = $('#fps').textContent + ' к/с · 
 
 // ---------- второе окно: камера глубины ----------
 let splitOn = false; try { splitOn = localStorage.getItem('split') === '1'; } catch {}
-function setSplit(v){ splitOn = v; document.body.classList.toggle('split', v); $('#depthBtn').classList.toggle('on', v); syncM3d();
+function setSplit(v){ splitOn = v; document.body.classList.toggle('split', v); $('#depthBtn').classList.toggle('on', v); syncM3d(); depthSync();
   try { localStorage.setItem('split', v ? '1' : '0'); } catch {} }
 setSplit(splitOn);
 $('#depthBtn').addEventListener('click', () => setSplit(!splitOn));
@@ -567,11 +567,16 @@ function depthConnect(){
   dws.onmessage = depthMsg;
 }
 // Pi 4 сама отдаёт кадры (релей присылает адрес) — подключаемся к ней напрямую, мимо эфира Zero
+// напрямую к Pi 4 — только пока окно глубины на экране: каждая открытая вкладка иначе тянет ~4 Мбит/с из эфира
+function depthWanted(){ return splitOn && paneTab !== 'map' && !document.hidden; }
 function depthDirect(){
-  if (!dSrc || dDirect) return;
+  if (!dSrc || dDirect || !depthWanted()) return;
   dDirect = new WebSocket(dSrc); dDirect.binaryType = 'arraybuffer';
   dDirect.onmessage = depthMsg;
   dDirect.onclose = () => { dDirect = null; setTimeout(depthDirect, 1500); };
+}
+function depthSync(){
+  try { if (depthWanted()) depthDirect(); else if (dDirect) dDirect.close(); } catch {}
 }
 function depthMsg(e){
   if (typeof e.data !== 'string') {
@@ -604,7 +609,7 @@ function setTab(t){
   $('#tabDepth').classList.toggle('on', !m); $('#tabMap').classList.toggle('on', m);
   $('#mapBtn').classList.toggle('on', m && splitOn);
   try { localStorage.setItem('paneTab', t); } catch {}
-  syncM3d();
+  syncM3d(); depthSync();
 }
 // карте: панель ставить сразу под вкладками (в координатах окна карты)
 function barTop(){ const c = $('#paneCtl'); return c.offsetTop + c.offsetHeight + 8; }
@@ -615,6 +620,7 @@ function syncM3d(){
   } catch {}                                                        // setSplit зовёт до объявления paneTab
 }
 $('#map3dFrame').addEventListener('load', syncM3d);
+document.addEventListener('visibilitychange', depthSync);
 addEventListener('resize', syncM3d);
 $('#tabDepth').onclick = () => setTab('depth');
 $('#tabMap').onclick = () => setTab('map');

@@ -35,6 +35,15 @@
   #help{position:fixed;left:calc(env(safe-area-inset-left) + 12px);bottom:calc(env(safe-area-inset-bottom) + 10px);color:var(--faint);font-size:12px}
   .lag-bad{color:var(--warn)}
   .btn.stop{background:#7f1d1d;border-color:#b91c1c}
+  #learn{position:fixed;right:12px;bottom:calc(env(safe-area-inset-bottom) + 12px);z-index:5;width:min(560px,calc(100% - 24px));
+    max-height:60%;overflow:auto;background:#15181df2;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px}
+  #learn header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+  #learn .lk{margin:4px 0;color:var(--fg)} #learn .k{color:var(--dim);font-size:12px}
+  #learn table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px;margin-top:6px}
+  #learn th{color:var(--dim);font-weight:500;text-align:right;padding:3px 4px;border-bottom:1px solid var(--line)}
+  #learn td{text-align:right;padding:3px 4px;border-bottom:1px solid #ffffff0a}
+  #learn th:nth-child(2),#learn td:nth-child(2){text-align:left}
+  #learn .bad{color:var(--bad)} #learn .ok{color:var(--ok)}
   .btn.ap.on{background:var(--ok);border-color:var(--ok);color:#06210f}
   #goBtn.on{background:#3b82f6;border-color:#3b82f6;color:#fff}
   body.picking canvas{cursor:crosshair}
@@ -64,11 +73,20 @@
   <button class="btn ap" data-ap="home" title="вернуться на старт">домой</button>
   <button class="btn" id="goBtn" title="следующее касание пола на карте — машинка едет туда">в точку</button>
   <button class="btn stop" data-ap="stop" title="остановить автопилот">стоп</button>
+  <button class="btn" id="learnBtn" title="как идёт обучение: заезды и выученные параметры">обучение</button>
   <button class="btn on" id="layCloud" title="облако точек (C)">облако</button>
   <button class="btn on" id="layGrid" title="где можно ехать: зелёное — свободно, красное — препятствие (P)">проходимость</button>
   <button class="btn on" id="follow" title="камера следует за машинкой (F)">следом</button>
   <button class="btn" id="top" title="вид сверху (T)">сверху</button>
   <a class="btn full" href="/" style="text-decoration:none;color:inherit">пульт</a>
+</div>
+<div id="learn" hidden>
+  <header><b>Обучение автопилота</b><button class="btn" id="learnClose" aria-label="закрыть">✕</button></header>
+  <p class="lk">Остановка <b class="num" id="lStop">—</b> м · накат <b class="num" id="lCoast">—</b> м
+    <span class="k">— после заезда без упоров остановка −5 см (не ниже 30), за упор +5</span></p>
+  <p class="lk" id="lLive"></p>
+  <table><thead><tr><th>#</th><th>режим</th><th>с</th><th>путь, м</th><th>пол, м²</th><th>упоры</th><th>тупики</th><th>развороты</th><th>круг</th><th>стоп→</th></tr></thead>
+  <tbody id="lRows"></tbody></table>
 </div>
 <div id="empty"><p id="emptyTxt">Жду живой SLAM. На маке запусти <b>live_slam.py</b>: облако и карта проходимости начнут расти, пока машинка едет.</p></div>
 <div id="help"><span class="legend"><span><i style="background:#5fd38a"></i>можно ехать</span><span><i style="background:#ff6257"></i>препятствие</span></span>крутить: левая кнопка или палец · сдвиг: правая или два пальца · масштаб: колесо или щипок</div>
@@ -162,6 +180,7 @@ function L2T(x, y, z){                                               // выро
   return new THREE.Vector3(p[0], -p[1], -p[2]);
 }
 function onPlan(m){
+  renderLearn(m.learn);
   if (m.R) planR = m.R; if (m.floor !== undefined) planFloor = m.floor;
   const names = {idle: 'ждёт', explore: 'исследует', lap: 'круг', goto: 'в точку', home: 'домой'};
   $('#apState').textContent = (names[m.mode] || m.mode) + (m.mode !== 'idle' ? ' · ' + m.state : '') + (m.frontiers ? ` · фронтиров ${m.frontiers}` : '');
@@ -186,6 +205,19 @@ function onPlan(m){
     ring.position.copy(L2T(pt[0], pt[1], z)); planGroup.add(ring);
   }
 }
+function renderLearn(L){
+  if (!L) return;
+  $('#lStop').textContent = L.stop_m.toFixed(2); $('#lCoast').textContent = L.coast_m.toFixed(2);
+  const lv = L.live;
+  $('#lLive').innerHTML = lv ? `Сейчас: ${lv.seconds} с, путь ${lv.path_m} м, упоров <b class="${lv.bumps ? 'bad' : 'ok'}">${lv.bumps}</b>, тупиков ${lv.stops}, разворотов ${lv.reverses}` : 'Сейчас автопилот не едет.';
+  const names = {explore: 'исследовать', lap: 'круг', goto: 'в точку', home: 'домой'};
+  $('#lRows').innerHTML = L.episodes.map((e, i) => `<tr><td>${i + 1}</td><td>${names[e.mode] || e.mode}</td><td>${Math.round(e.seconds)}</td><td>${e.path_m}</td>
+    <td>${e.free_m2}</td><td class="${e.bumps ? 'bad' : ''}">${e.bumps}</td><td>${e.stops}</td><td>${e.reverses}</td>
+    <td class="${e.lap_closed ? 'ok' : ''}">${e.lap_closed ? 'да' : '—'}</td><td>${e.stop_m ?? '—'}</td></tr>`).reverse().join('');
+}
+$('#learnBtn').onclick = () => { const el = $('#learn'); el.hidden = !el.hidden; $('#learnBtn').classList.toggle('on', !el.hidden); };
+$('#learnClose').onclick = () => $('#learnBtn').click();
+
 function apSend(o){ if (ws && ws.readyState === 1) ws.send(JSON.stringify({type: 'auto', ...o})); }
 document.querySelectorAll('[data-ap]').forEach(b => b.onclick = () => apSend({cmd: b.dataset.ap}));
 function setPick(v){ pickOn = v; $('#goBtn').classList.toggle('on', v); document.body.classList.toggle('picking', v); }

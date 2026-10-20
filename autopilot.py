@@ -191,6 +191,8 @@ class Autopilot:
         self.path, self.target, self.goal, self.ring, self.ring_i, self.frontiers = [], None, None, [], 0, 0
         self.plan_t = 0; self.man = None; self.escapes = []; self.last_move = time.time()
         self.sent = (0.0, 0.0); self.override_since = None; self.ep = None; self.planning = False; self.loop = None; self.need_look = False
+        self.sent_changed = 0.0
+        self.history = [json.loads(f.read_text()) for f in sorted(OUT.glob("report-*.json"))[-12:]] if OUT.exists() else []
 
     # --- поза и геометрия ---
     def pose2d(self, T):
@@ -348,6 +350,7 @@ class Autopilot:
         OUT.mkdir(parents=True, exist_ok=True)
         (OUT / f"report-{time.strftime('%Y%m%d-%H%M%S')}-{e['mode']}.json").write_text(json.dumps({**rep, "new_params": self.P}, ensure_ascii=False, indent=1))
         (OUT / "params.json").write_text(json.dumps(self.P, indent=1))
+        self.history = (self.history + [{**rep, "new_params": dict(self.P)}])[-12:]
         print("разбор:", json.dumps(rep, ensure_ascii=False))
 
     def plan_msg(self):
@@ -356,7 +359,13 @@ class Autopilot:
                 "target": [round(v, 3) for v in self.target] if self.target else None, "frontiers": self.frontiers,
                 "ring": [[round(x, 3), round(y, 3)] for x, y in self.ring], "home": self.home[:2] if self.home else None,
                 "R": g.R.round(5).tolist() if g.R is not None else None, "floor": -g.a.cam_height,
-                "stop_m": self.P["stop_m"], "pose": [round(v, 3) for v in self.pose] if self.pose else None}
+                "stop_m": self.P["stop_m"], "pose": [round(v, 3) for v in self.pose] if self.pose else None,
+                # для панели «обучение»: заезды и выученные параметры
+                "learn": {"stop_m": self.P["stop_m"], "coast_m": self.P["coast_m"],
+                          "episodes": [{k: h.get(k) for k in ("mode", "seconds", "path_m", "free_m2", "bumps", "stops", "reverses", "lap_closed")}
+                                       | {"stop_m": (h.get("new_params") or {}).get("stop_m")} for h in self.history],
+                          "live": {k: self.ep.get(k) for k in ("bumps", "stops", "reverses")} | {"seconds": round(time.time() - self.ep["t0"]),
+                                   "path_m": round(self.dist_total - self.ep["path0"], 2)} if self.ep else None}}
 
 async def main(a):
     OUT.mkdir(parents=True, exist_ok=True)
@@ -437,13 +446,17 @@ async def main(a):
                     if why != ap.state: ap.state, ap.state_t = why, now
                     active = ap.mode != "idle" or ap.man is not None
                     # человек взял управление: машинка делает не то, что мы шлём
-                    if driving and ap.tele and abs(float(ap.tele.get("thr", 0)) - ap.sent[0] * 1.0) > 0.3 and abs(ap.sent[0]) > 0:
+                    # (сравниваем, только когда наша команда 0.5 с не менялась: телеметрия запаздывает, а двойное
+                    #  нажатие заднего хода меняет газ -1 → 0 → -1 быстрее, чем она приходит)
+                    steady = now - ap.sent_changed > 0.5
+                    if driving and steady and ap.tele and abs(float(ap.tele.get("thr", 0)) - ap.sent[0]) > 0.3 and abs(ap.sent[0]) > 0:
                         ap.override_since = ap.override_since or now
-                        if now - ap.override_since > 0.6: print("человек взял управление"); ap.set_mode("idle"); ap.man = None; active = False
+                        if now - ap.override_since > 1.0: print("человек взял управление"); ap.set_mode("idle"); ap.man = None; active = False
                     else: ap.override_since = None
                     if active:
                         if not driving: await pult.send_str(json.dumps({"type": "esp", "cmd": "mode,2"})); driving = True
                         await pult.send_str(json.dumps({"type": "cmd", "id": i, "steer": round(st, 2), "throttle": round(thr, 2)})); i += 1
+                        if abs(thr - ap.sent[0]) > 0.05: ap.sent_changed = now
                         ap.sent = (thr, st)
                     elif driving:                                     # закончили — нейтраль и ручной руль человеку
                         for _ in range(6):

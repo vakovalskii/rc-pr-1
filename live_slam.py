@@ -100,8 +100,9 @@ class Grid:
         return meta, buf.getvalue()
 
 class Live:
-    def __init__(self, a):
-        self.a = a; self.reset(None)
+    def __init__(self, a, freeze_up=False):
+        self.a, self.freeze_up = a, freeze_up      # freeze_up: оси карты не поворачивать (автопилоту нужна неподвижная сетка)
+        self.reset(None)
 
     def reset(self, rec):
         self.tr, self.cam_i, self.seen, self.pts, self.path, self.n, self.t0 = None, None, set(), 0, [], 0, time.time()
@@ -150,7 +151,7 @@ class Live:
                 mm = np.clip(xyz[new] * 1000, -32767, 32767).astype("<i2"); c8 = (col[new] * 255).astype(np.uint8)
                 chunk = b"P" + int(new.sum()).to_bytes(4, "little") + mm.tobytes() + c8.tobytes()
                 self.pts += int(new.sum())
-        if self.n % 10 == 0 and len(self.path) > 20:          # «вверх» по плоскости траектории (как в slam.py)
+        if not self.freeze_up and self.n % 10 == 0 and len(self.path) > 20:   # «вверх» по плоскости траектории (как в slam.py)
             P = np.array(self.path); ev, evec = np.linalg.eigh(np.cov((P - P.mean(0)).T))
             if ev[2] > 0.3 ** 2 and ev[1] > 0.15 ** 2 and ev[0] < 0.03 ** 2:
                 self.traj_up = evec[:, 0] * (1 if evec[1, 0] < 0 else -1); self.grid.set_up(self.traj_up)

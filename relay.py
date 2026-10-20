@@ -206,6 +206,7 @@ async def _m3_send(ws, data, binary):
 async def ws_map3d(request):                       # источник: live_slam.py
     ws = web.WebSocketResponse(max_msg_size=32 << 20)
     await ws.prepare(request)
+    map3d["producer"] = ws
     print("[map3d] SLAM подключился")
     async for msg in ws:
         binary = msg.type == WSMsgType.BINARY
@@ -221,7 +222,9 @@ async def ws_map3d(request):                       # источник: live_slam
             m = json.loads(msg.data)
             if m.get("type") == "reset": map3d["chunks"].clear(); map3d["grid"] = None; map3d["bytes"] = 0
             if m.get("type") == "pose": map3d["pose"] = msg.data
+            if m.get("type") == "plan": map3d["plan"] = msg.data
         for v in list(map3d["viewers"]): asyncio.ensure_future(_m3_send(v, msg.data, binary))
+    if map3d.get("producer") is ws: map3d["producer"] = None
     print("[map3d] SLAM отключился")
     return ws
 
@@ -231,9 +234,13 @@ async def ws_map3dview(request):                   # зрители: /map3d.html
     for c in list(map3d["chunks"]): await ws.send_bytes(c)
     if map3d["grid"]: await ws.send_bytes(map3d["grid"])
     if map3d["pose"]: await ws.send_str(map3d["pose"])
+    if map3d.get("plan"): await ws.send_str(map3d["plan"])
     map3d["viewers"].add(ws)
     try:
-        async for _ in ws: pass
+        async for msg in ws:                       # кнопки автопилота и «езжай сюда» — в автопилот (live_slam/autopilot)
+            if msg.type == WSMsgType.TEXT and map3d.get("producer") is not None:
+                try: await map3d["producer"].send_str(msg.data)
+                except Exception: pass
     finally:
         map3d["viewers"].discard(ws)
     return ws

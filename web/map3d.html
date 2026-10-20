@@ -34,10 +34,14 @@
   #empty b{color:var(--fg)}
   #help{position:fixed;left:calc(env(safe-area-inset-left) + 12px);bottom:calc(env(safe-area-inset-bottom) + 10px);color:var(--faint);font-size:12px}
   .lag-bad{color:var(--warn)}
+  .btn.stop{background:#7f1d1d;border-color:#b91c1c}
+  .btn.ap.on{background:var(--ok);border-color:var(--ok);color:#06210f}
+  #goBtn.on{background:#3b82f6;border-color:#3b82f6;color:#fff}
+  body.picking canvas{cursor:crosshair}
   body.embed #bar{top:var(--bar-top,60px);right:auto;max-width:calc(100% - 190px);padding:0 8px;gap:6px;background:none}
   body.embed .sp{display:none}
   @media (max-width:700px){                                         /* узкое окно в пульте (телефон) */
-    body.embed .pill{display:none} body.embed #ptsPill{display:flex} body.embed #bar{max-width:none}
+    body.embed .pill{display:none} body.embed #ptsPill, body.embed .auto-st{display:flex} body.embed #bar{max-width:none}
     body.embed .btn{min-height:28px;padding:4px 8px;font-size:12px}
   }
   body.embed .pill{padding:4px 8px;font-size:13px} body.embed .btn{min-height:32px;padding:5px 10px;font-size:13px}
@@ -54,6 +58,12 @@
   <div class="pill"><span class="k">путь</span><b class="num" id="path">0.0</b><span class="k">м</span></div>
   <div class="pill"><span class="k">SLAM</span><b class="num" id="fps">—</b><span class="k">к/с ·</span><b class="num" id="lag">—</b><span class="k">мс</span></div>
   <div class="sp"></div>
+  <div class="pill auto-st"><span class="k">автопилот</span><b id="apState">—</b></div>
+  <button class="btn ap" data-ap="explore" title="сам исследует комнату по фронтирам">исследовать</button>
+  <button class="btn ap" data-ap="lap" title="круг по комнате в ~45 см от стен">круг</button>
+  <button class="btn ap" data-ap="home" title="вернуться на старт">домой</button>
+  <button class="btn" id="goBtn" title="следующее касание пола на карте — машинка едет туда">в точку</button>
+  <button class="btn stop" data-ap="stop" title="остановить автопилот">стоп</button>
   <button class="btn on" id="layCloud" title="облако точек (C)">облако</button>
   <button class="btn on" id="layGrid" title="где можно ехать: зелёное — свободно, красное — препятствие (P)">проходимость</button>
   <button class="btn on" id="follow" title="камера следует за машинкой (F)">следом</button>
@@ -144,6 +154,60 @@ function onGrid(buf){
   };
   img.src = url;
 }
+// ---------- автопилот: кнопки, план на карте, «в точку» ----------
+let planR = null, planFloor = -0.1, pickOn = false;
+const planGroup = new THREE.Group(); world.add(planGroup);
+function L2T(x, y, z){                                               // выровненная система → three (в группе world)
+  const R = planR, p = [0, 1, 2].map(j => R[0][j] * x + R[1][j] * y + R[2][j] * z);
+  return new THREE.Vector3(p[0], -p[1], -p[2]);
+}
+function onPlan(m){
+  if (m.R) planR = m.R; if (m.floor !== undefined) planFloor = m.floor;
+  const names = {idle: 'ждёт', explore: 'исследует', lap: 'круг', goto: 'в точку', home: 'домой'};
+  $('#apState').textContent = (names[m.mode] || m.mode) + (m.mode !== 'idle' ? ' · ' + m.state : '') + (m.frontiers ? ` · фронтиров ${m.frontiers}` : '');
+  document.querySelectorAll('.btn.ap').forEach(b => b.classList.toggle('on', b.dataset.ap === m.mode));
+  while (planGroup.children.length) { const c = planGroup.children.pop(); c.geometry.dispose(); }
+  if (!planR) return;
+  const z = planFloor + 0.02;
+  if (m.path && m.path.length) {
+    const pts = [m.pose ? L2T(m.pose[0], m.pose[1], z) : null, ...m.path.map(([x, y]) => L2T(x, y, z))].filter(Boolean);
+    planGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({color: 0x3b82f6})));
+  }
+  if (m.ring && m.ring.length > 2) {
+    const pts = [...m.ring, m.ring[0]].map(([x, y]) => L2T(x, y, z));
+    const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineDashedMaterial({color: 0x5fd38a, dashSize: 0.08, gapSize: 0.05}));
+    l.computeLineDistances(); planGroup.add(l);
+  }
+  for (const [pt, col] of [[m.target, 0x3b82f6], [m.home, 0xffd166]]) {
+    if (!pt) continue;
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.08, 0.12, 24), new THREE.MeshBasicMaterial({color: col, side: THREE.DoubleSide}));
+    const nrm = L2T(0, 0, 1).sub(L2T(0, 0, 0)).normalize();          // кольцо кладём на пол
+    ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), nrm);
+    ring.position.copy(L2T(pt[0], pt[1], z)); planGroup.add(ring);
+  }
+}
+function apSend(o){ if (ws && ws.readyState === 1) ws.send(JSON.stringify({type: 'auto', ...o})); }
+document.querySelectorAll('[data-ap]').forEach(b => b.onclick = () => apSend({cmd: b.dataset.ap}));
+function setPick(v){ pickOn = v; $('#goBtn').classList.toggle('on', v); document.body.classList.toggle('picking', v); }
+$('#goBtn').onclick = () => setPick(!pickOn);
+// касание пола: луч из камеры → плоскость пола (большой невидимый квадрат) → выровненные x, y
+let floorPick = null, downAt = null;
+renderer.domElement.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!pickOn || !planR || !downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;   // тянули — это вращение
+  if (!floorPick) {
+    const c = [[-20, -20], [20, -20], [20, 20], [-20, 20]].map(([x, y]) => L2T(x, y, planFloor));
+    const g = new THREE.BufferGeometry().setFromPoints(c); g.setIndex([0, 1, 2, 0, 2, 3]);
+    floorPick = new THREE.Mesh(g, new THREE.MeshBasicMaterial({side: THREE.DoubleSide})); floorPick.visible = false; world.add(floorPick);
+  }
+  const r = new THREE.Raycaster(), nd = new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -e.clientY / innerHeight * 2 + 1);
+  r.setFromCamera(nd, cam);
+  const hit = r.intersectObject(floorPick)[0]; if (!hit) return;
+  const l = world.worldToLocal(hit.point.clone()), pc = [l.x, -l.y, -l.z];
+  const q = planR.map(row => row[0] * pc[0] + row[1] * pc[1] + row[2] * pc[2]);
+  apSend({cmd: 'goto', x: +q[0].toFixed(3), y: +q[1].toFixed(3)}); setPick(false);
+});
+
 function setLayer(which, v){
   if (which === 'grid') { gridOn = v; if (gridMesh) gridMesh.visible = v; $('#layGrid').classList.toggle('on', v); }
   else { cloudOn = v; cloud.visible = v; $('#layCloud').classList.toggle('on', v); }
@@ -221,6 +285,7 @@ function connect(){
     const m = JSON.parse(e.data);
     if (m.type === 'reset') { clear(); $('#empty').style.display = ''; $('#emptyTxt').textContent = m.rec ? 'Новая запись. Жду первые точки…' : 'Жду первые точки…'; }
     if (m.type === 'pose') onPose(m);
+    if (m.type === 'plan') onPlan(m);
   };
 }
 connect();

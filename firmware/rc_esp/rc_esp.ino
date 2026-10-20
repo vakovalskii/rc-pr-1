@@ -52,6 +52,7 @@ Servo esc;
 int16_t cmdSteer = 0, cmdThr = 0;
 int32_t lastId = -1;
 uint32_t lastCmdMs = 0, stallSince = 0, stallBlockUntil = 0;
+int stallPot = 0;
 const int CENTER_DB = 30;                                    // |стик| < 3% — «отпустил руль»
 bool failsafe = true;
 int pot = 0, motorOut = 0, escUs = 1500;
@@ -111,9 +112,11 @@ void control() {
       out = constrain(err * cfg.kp, -(int)cfg.maxPwm, (int)cfg.maxPwm) * dir;
       if (abs(out) < cfg.minPwm) out = out > 0 ? cfg.minPwm : -cfg.minPwm;
     }
-    if (out != 0) {                                          // крутим долго и не доезжаем — бережём моторчик
-      if (!stallSince) stallSince = now;
-      if (now - stallSince > 1500) { stallBlockUntil = now + 1000; stallSince = 0; }
+    // заклинило: моторчик крутит, а потенциометр 0.8 с стоит на месте — пауза, бережём моторчик.
+    // (по одному только времени работы нельзя: при езде к далёкой цели это нормальная долгая работа)
+    if (out != 0) {
+      if (!stallSince || abs(pot - stallPot) > 15) { stallSince = now; stallPot = pot; }
+      else if (now - stallSince > 800) { stallBlockUntil = now + 600; stallSince = 0; }
     } else stallSince = 0;
     if (now < stallBlockUntil) out = 0;
   } else stallSince = 0;

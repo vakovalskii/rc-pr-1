@@ -43,6 +43,8 @@ def open_camera(a):
     prof = pipe.start(cfg)
     dev = prof.get_device()
     scale = dev.first_depth_sensor().get_depth_scale()
+    global DI
+    DI = prof.get_stream(rs.stream.depth).as_video_stream_profile().intrinsics
     usb = dev.get_info(rs.camera_info.usb_type_descriptor)
     print(f"RealSense {dev.get_info(rs.camera_info.name)}, USB {usb}, глубина {a.width}x{a.height}@{a.fps}")
     return pipe, scale, usb
@@ -106,6 +108,33 @@ class Recorder:
             Image.fromarray(rgb).save(dr / "color" / f"{i:06d}.jpg", quality=92)
             with open(dr / "frames.csv", "a") as f: f.write(f"{i},{ts:.1f}\n")
 
+DI, PROF = None, None
+
+def profile(z, a):
+    """Профиль препятствий для автопилота: 16 секторов по горизонтали, в каждом — ближняя дистанция (м)
+    до точек на высоте корпуса. Камера наклонена вверх на a.pitch и стоит на a.cam_height над полом.
+    Ещё доля «дыр» (нет глубины) внизу по центру: D455 ближе ~0.4 м не видит, и большая дыра там —
+    признак, что препятствие уже совсем рядом."""
+    global PROF
+    if PROF is None:                                   # лучи пикселей считаем один раз (каждый 4-й пиксель)
+        v, u = np.mgrid[0:z.shape[0]:4, 0:z.shape[1]:4]
+        th = np.radians(a.pitch)
+        PROF = {"rx": (u - DI.ppx) / DI.fx, "ry": (v - DI.ppy) / DI.fy, "s": np.sin(th), "c": np.cos(th)}
+    P = PROF; zz = z[::4, ::4]
+    Y = P["ry"] * zz
+    h = a.cam_height - Y * P["c"] + zz * P["s"]        # высота над полом
+    d = Y * P["s"] + zz * P["c"]                       # вперёд по полу
+    x = P["rx"] * zz                                   # вбок (вправо +)
+    m = (zz > 0) & (h > a.body_min) & (h < a.body_max) & (d > 0.05)
+    ang = np.degrees(np.arctan2(x[m], d[m])); rng = np.hypot(x[m], d[m])
+    bins = np.clip(((ang + 44) / 88 * 16).astype(int), 0, 15)
+    prof = []
+    for b in range(16):
+        r = rng[bins == b]
+        prof.append(round(float(np.percentile(r, 5)), 2) if r.size >= 8 else None)
+    lo = zz[zz.shape[0] * 2 // 3:, zz.shape[1] // 4: zz.shape[1] * 3 // 4]
+    return prof, round(float((lo == 0).mean()), 2)
+
 rec = None
 raw_viewers, raw_at = set(), 0.0                   # live_slam.py: уменьшенная RGBD-пара несколько раз в секунду
 
@@ -125,6 +154,7 @@ def grab(pipe, scale, a, filt):
              "center": round(float(np.median(c)), 2) if c.size else None,
              "ahead": round(float(np.percentile(band, 3)), 2) if band.size > 50 else None,   # 3-й перцентиль: шум не считаем препятствием
              "valid": round(float((z > 0).mean()), 2), "w": w, "h": h,
+             **dict(zip(("prof", "hole_lo"), profile(z, a))),
              **({"rec": rec.n, "rec_drop": rec.dropped, "rec_s": round(time.time() - rec.t0, 1)} if rec and rec.dir else {})}
     buf = io.BytesIO(); Image.fromarray(colorize(z, a.near, a.far)).save(buf, "JPEG", quality=a.quality)
     return buf.getvalue(), stats, rawmsg
@@ -195,8 +225,12 @@ async def main(a):
             n, t0 = 0, time.time()
             while True:
                 jpeg, stats, rawmsg = await loop.run_in_executor(None, grab_checked, pipe, scale, a, filt)
-                for v in list(raw_viewers):
-                    if rawmsg and v not in busy: asyncio.ensure_future(_send(v, rawmsg))
+                js_raw = None
+                for v in list(raw_viewers):                # автопилот: цифры каждого кадра + сырые пары по расписанию
+                    if v in busy: continue
+                    js_raw = js_raw or json.dumps(stats)
+                    asyncio.ensure_future(_send(v, js_raw))
+                    if rawmsg: asyncio.ensure_future(_send(v, rawmsg))
                 n += 1
                 stats["fps"] = round(n / max(time.time() - t0, 1e-3), 1); stats["usb"] = usb
                 if time.time() - t0 > 5: n, t0 = 0, time.time()
@@ -221,5 +255,9 @@ if __name__ == "__main__":
     p.add_argument("--serve", type=int, default=0, help="порт: отдавать кадры пультам напрямую, релею — только адрес и цифры")
     p.add_argument("--color", action="store_true", help="включить цветную камеру и запись для SLAM по флагу ~/rc/rec.on")
     p.add_argument("--raw-fps", type=float, default=4, help="к/с уменьшенных RGBD-пар для живой 3D-карты (live_slam.py)")
+    p.add_argument("--pitch", type=float, default=25, help="°, камера смотрит вверх (для профиля препятствий)")
+    p.add_argument("--cam-height", type=float, default=0.10, help="м, высота камеры над полом")
+    p.add_argument("--body-min", type=float, default=0.04, help="м, ниже — пол")
+    p.add_argument("--body-max", type=float, default=0.35, help="м, выше — машинка проедет под")
     p.add_argument("--reset", action="store_true", help="аппаратный сброс камеры при старте")
     asyncio.run(main(p.parse_args()))

@@ -226,7 +226,7 @@ async def main(a):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--relay", default="http://192.168.1.137:8080")
+    p.add_argument("--relay", default="http://pizero2w.local:8080")
     p.add_argument("--pi4", help="адрес depth_cam, например ws://192.168.1.109:8090/ (по умолчанию спросить у релея)")
     p.add_argument("--voxel", type=float, default=0.04, help="м, шаг облака для показа")
     p.add_argument("--depth-max", type=float, default=2.5, help="м, дальше глубина D455 шумит и мажет карту")

@@ -1,7 +1,7 @@
 """
 Камера глубины RealSense (D455 на Pi 4) -> релей -> пульт вторым окном.
 
-    ~/rs-venv/bin/python depth_cam.py --url ws://192.168.1.137:8080/ws/depth
+    ~/rs-venv/bin/python depth_cam.py --url ws://pizero2w.local:8080/ws/depth
 
 Шлёт два вида сообщений:
   * JPEG раскрашенной глубины (ближе — тёплое, дальше — холодное), по кадру в пути, без очереди;
@@ -245,7 +245,7 @@ async def main(a):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--url", default="ws://192.168.1.137:8080/ws/depth")
+    p.add_argument("--url", default="ws://pizero2w.local:8080/ws/depth")
     p.add_argument("--width", type=int, default=640)
     p.add_argument("--height", type=int, default=480)
     p.add_argument("--fps", type=int, default=15)

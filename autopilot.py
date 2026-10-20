@@ -479,6 +479,6 @@ async def main(a):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--start", choices=["explore", "lap", "home"], help="сразу начать")
-    p.add_argument("--relay", default="http://192.168.1.137:8080")
-    p.add_argument("--pi4", default="http://192.168.1.109:8090/")
+    p.add_argument("--relay", default="http://pizero2w.local:8080")
+    p.add_argument("--pi4", default="http://raspberrypi.local:8090/")
     asyncio.run(main(p.parse_args()))

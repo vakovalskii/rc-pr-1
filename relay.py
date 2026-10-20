@@ -190,7 +190,13 @@ async def ws_depthview(request):                   # зрители: пульт�
 
 # --- живая 3D-карта: live_slam.py (на маке) шлёт сюда куски облака и позу, страницы /map3d.html смотрят.
 # Куски облака копим, чтобы вкладка, открытая посреди проезда, сразу получила всё, что уже собрано.
-map3d = {"chunks": [], "pose": None, "viewers": set()}
+# Сетка проходимости (b"G") — только последняя, и она же пишется в папку карты: map.html и минимапа видят её сразу.
+map3d = {"chunks": [], "pose": None, "grid": None, "viewers": set(), "dir": None}
+
+def save_grid(b):
+    if not map3d["dir"]: return
+    L = int.from_bytes(b[1:5], "little"); d = pathlib.Path(map3d["dir"])
+    (d / "map.png").write_bytes(b[5 + L:]); (d / "map.json").write_bytes(b[5:5 + L])
 
 async def _m3_send(ws, data, binary):
     try: await (ws.send_bytes(data) if binary else ws.send_str(data))
@@ -203,10 +209,14 @@ async def ws_map3d(request):                       # источник: live_slam
     async for msg in ws:
         binary = msg.type == WSMsgType.BINARY
         if not binary and msg.type != WSMsgType.TEXT: continue
-        if binary: map3d["chunks"].append(msg.data)
+        if binary and msg.data[:1] == b"G":
+            map3d["grid"] = msg.data
+            try: save_grid(msg.data)
+            except Exception as e: print("[map3d] не записал карту:", e)
+        elif binary: map3d["chunks"].append(msg.data)
         else:
             m = json.loads(msg.data)
-            if m.get("type") == "reset": map3d["chunks"].clear()
+            if m.get("type") == "reset": map3d["chunks"].clear(); map3d["grid"] = None
             if m.get("type") == "pose": map3d["pose"] = msg.data
         for v in list(map3d["viewers"]): asyncio.ensure_future(_m3_send(v, msg.data, binary))
     print("[map3d] SLAM отключился")
@@ -216,6 +226,7 @@ async def ws_map3dview(request):                   # зрители: /map3d.html
     ws = web.WebSocketResponse()
     await ws.prepare(request)
     for c in list(map3d["chunks"]): await ws.send_bytes(c)
+    if map3d["grid"]: await ws.send_bytes(map3d["grid"])
     if map3d["pose"]: await ws.send_str(map3d["pose"])
     map3d["viewers"].add(ws)
     try:
@@ -276,6 +287,7 @@ def make_app(map_dir=None):
         web.static("/web", WEB),
     ]
     if map_dir:                                  # карта полигона для минимапы и /map.html
+        pathlib.Path(map_dir).mkdir(parents=True, exist_ok=True); map3d["dir"] = map_dir
         routes.append(web.static("/map", pathlib.Path(map_dir)))
     MODELS.mkdir(exist_ok=True)
     routes.append(web.static("/models", MODELS))  # кривые обучения для /train.html

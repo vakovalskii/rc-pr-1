@@ -34,6 +34,13 @@
   #empty b{color:var(--fg)}
   #help{position:fixed;left:calc(env(safe-area-inset-left) + 12px);bottom:calc(env(safe-area-inset-bottom) + 10px);color:var(--faint);font-size:12px}
   .lag-bad{color:var(--warn)}
+  body.embed #bar{top:auto;right:auto;bottom:calc(env(safe-area-inset-bottom) + 60px);max-width:62%;padding:0 0 0 12px;
+    gap:6px;background:none;flex-wrap:wrap-reverse}
+  body.embed .sp{display:none}
+  body.embed .pill{padding:4px 8px;font-size:13px} body.embed .btn{min-height:32px;padding:5px 10px;font-size:13px}
+  body.embed #help, body.embed .full{display:none}
+  .legend{display:flex;gap:10px;align-items:center;font-size:12px;color:var(--dim)}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 </style>
 </head>
 <body>
@@ -44,17 +51,29 @@
   <div class="pill"><span class="k">путь</span><b class="num" id="path">0.0</b><span class="k">м</span></div>
   <div class="pill"><span class="k">SLAM</span><b class="num" id="fps">—</b><span class="k">к/с ·</span><b class="num" id="lag">—</b><span class="k">мс</span></div>
   <div class="sp"></div>
+  <button class="btn on" id="layCloud" title="облако точек (C)">облако</button>
+  <button class="btn on" id="layGrid" title="где можно ехать: зелёное — свободно, красное — препятствие (P)">проходимость</button>
   <button class="btn on" id="follow" title="камера следует за машинкой (F)">следом</button>
   <button class="btn" id="top" title="вид сверху (T)">сверху</button>
-  <a class="btn" href="/" style="text-decoration:none;color:inherit">пульт</a>
+  <a class="btn full" href="/" style="text-decoration:none;color:inherit">пульт</a>
 </div>
-<div id="empty"><p id="emptyTxt">Жду живой SLAM. На маке запусти <b>live_slam.py</b>, тогда облако начнёт расти, пока машинка едет.</p></div>
-<div id="help">крутить: левая кнопка или палец · сдвиг: правая или два пальца · масштаб: колесо или щипок</div>
+<div id="empty"><p id="emptyTxt">Жду живой SLAM. На маке запусти <b>live_slam.py</b>: облако и карта проходимости начнут расти, пока машинка едет.</p></div>
+<div id="help"><span class="legend"><span><i style="background:#5fd38a"></i>можно ехать</span><span><i style="background:#ff6257"></i>препятствие</span></span>крутить: левая кнопка или палец · сдвиг: правая или два пальца · масштаб: колесо или щипок</div>
 
 <script src="/web/vendor/three.min.js"></script>
 <script src="/web/vendor/OrbitControls.js"></script>
 <script>
 const $ = s => document.querySelector(s);
+const EMBED = new URLSearchParams(location.search).has('embed');   // окно внутри пульта
+if (EMBED) {
+  document.body.classList.add('embed');
+  // фокус в окне карты не должен отнимать управление: клавиши уходят в пульт
+  for (const t of ['keydown', 'keyup']) addEventListener(t, e => {
+    if (['KeyF', 'KeyT', 'KeyC', 'KeyP'].includes(e.code)) return;   // свои клавиши карты
+    try { parent.dispatchEvent(new KeyboardEvent(t, {code: e.code, key: e.key, shiftKey: e.shiftKey, repeat: e.repeat})); } catch {}
+    e.preventDefault();
+  });
+}
 // Мир live_slam — система первого кадра камеры: x вправо, y вниз, z вперёд. В three: y вверх, вперёд = -z.
 const renderer = new THREE.WebGLRenderer({antialias: true});
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -85,9 +104,52 @@ const ptMat = new THREE.PointsMaterial({size: 0.035, vertexColors: true, sizeAtt
 function resize(){ renderer.setSize(innerWidth, innerHeight); cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
+// ---------- проходимость: сетка из live_slam ложится на пол ----------
+let gridMesh = null, gridOn = true, cloudOn = true;
+function onGrid(buf){
+  const L = new DataView(buf).getUint32(1, true);
+  const gm = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 5, L)));
+  const img = new Image(), url = URL.createObjectURL(new Blob([new Uint8Array(buf, 5 + L)], {type: 'image/png'}));
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+    const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height), px = d.data;
+    for (let i = 0; i < px.length; i += 4) {                         // 255 свободно, 0 препятствие, 128 неизвестно
+      const v = px[i];
+      if (v > 200) { px[i] = 95; px[i + 1] = 211; px[i + 2] = 138; px[i + 3] = 120; }
+      else if (v < 60) { px[i] = 255; px[i + 1] = 98; px[i + 2] = 87; px[i + 3] = 230; }
+      else px[i + 3] = 0;
+    }
+    g.putImageData(d, 0, 0);
+    const tex = new THREE.CanvasTexture(c); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter;
+    // углы сетки: выровненная система (e1, e2, вверх) → мир первого кадра p = Rᵀq → three (x, -y, -z)
+    const R = gm.R, x0 = gm.origin[0], y0 = gm.origin[1], x1 = x0 + gm.width * gm.res, y1 = y0 + gm.height * gm.res, z = gm.floor + 0.005;
+    const P = (x, y) => { const p = [0, 1, 2].map(j => R[0][j] * x + R[1][j] * y + R[2][j] * z); return [p[0], -p[1], -p[2]]; };
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute([...P(x0, y0), ...P(x1, y0), ...P(x1, y1), ...P(x0, y1)], 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+    geo.setIndex([0, 1, 2, 0, 2, 3]);
+    const mat = new THREE.MeshBasicMaterial({map: tex, transparent: true, side: THREE.DoubleSide, depthWrite: false});
+    if (gridMesh) { world.remove(gridMesh); gridMesh.geometry.dispose(); gridMesh.material.map.dispose(); gridMesh.material.dispose(); }
+    gridMesh = new THREE.Mesh(geo, mat); gridMesh.visible = gridOn; gridMesh.renderOrder = 1; world.add(gridMesh);
+    grid.visible = false;                                            // своя сетка-пол больше не нужна
+    $('#empty').style.display = 'none';
+  };
+  img.src = url;
+}
+function setLayer(which, v){
+  if (which === 'grid') { gridOn = v; if (gridMesh) gridMesh.visible = v; $('#layGrid').classList.toggle('on', v); }
+  else { cloudOn = v; cloud.visible = v; $('#layCloud').classList.toggle('on', v); }
+}
+$('#layGrid').onclick = () => setLayer('grid', !gridOn);
+$('#layCloud').onclick = () => setLayer('cloud', !cloudOn);
+addEventListener('keydown', e => { if (e.code === 'KeyP') setLayer('grid', !gridOn); if (e.code === 'KeyC') setLayer('cloud', !cloudOn); });
+
 function clear(){
   while (cloud.children.length) { const c = cloud.children.pop(); c.geometry.dispose(); }
   pathN = 0; pathLen = 0; last = null; pathGeo.setDrawRange(0, 0); world.quaternion.identity();
+  if (gridMesh) { world.remove(gridMesh); gridMesh = null; } grid.visible = true;
   $('#pts').textContent = 0; $('#path').textContent = '0.0';
 }
 
@@ -148,7 +210,8 @@ function connect(){
   ws.onopen = () => { $('#dot').classList.add('on'); $('#link').textContent = 'на связи'; };
   ws.onclose = () => { $('#dot').classList.remove('on'); $('#link').textContent = 'нет связи'; setTimeout(connect, 1000); };
   ws.onmessage = e => {
-    if (typeof e.data !== 'string') { addChunk(e.data); return; }
+    if (typeof e.data !== 'string') { (new Uint8Array(e.data, 0, 1)[0] === 71 ? onGrid : addChunk)(e.data); return; }   // 71 = 'G'
+
     const m = JSON.parse(e.data);
     if (m.type === 'reset') { clear(); $('#empty').style.display = ''; $('#emptyTxt').textContent = m.rec ? 'Новая запись. Жду первые точки…' : 'Жду первые точки…'; }
     if (m.type === 'pose') onPose(m);

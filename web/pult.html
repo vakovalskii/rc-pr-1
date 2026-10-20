@@ -40,7 +40,8 @@
   body.split #osdCross{left:25%} @media (orientation:portrait){ body.split #osdCross{left:50%;top:25%} }
   #dInfo{position:absolute;left:0;right:0;top:calc(env(safe-area-inset-top) + 58px);text-align:center;pointer-events:none;
     font:600 14px/1.3 var(--mono);color:#f4f2ec;text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 4px #000}
-  #recBtn{position:absolute;right:14px;top:calc(env(safe-area-inset-top) + 58px);z-index:7;font:600 13px/1 system-ui,-apple-system,sans-serif;
+  #paneCtl{position:absolute;left:14px;top:calc(env(safe-area-inset-top) + 150px);z-index:7;display:flex;gap:8px;flex-wrap:wrap}
+  #recBtn{font:600 13px/1 system-ui,-apple-system,sans-serif;
     color:#f3efe6;background:#15181dd9;border:1px solid #3a3f47;border-radius:8px;padding:10px 12px;cursor:pointer;touch-action:manipulation}
   #recBtn:disabled{opacity:.4;cursor:default}
   #recBtn.on{background:#b91c1c;border-color:#ef4444}
@@ -50,6 +51,13 @@
   #dAhead.near{color:var(--bad)} #dAhead.mid{color:var(--warn)}
   #dBox{position:absolute;left:33.3%;width:33.3%;top:30%;height:45%;border:2px dashed #ffffff8c;pointer-events:none}
   #dOff{position:absolute;inset:0;display:grid;place-items:center;color:var(--faint);font-size:14px}
+  #paneTabs{display:flex;
+    background:#15181dd9;border:1px solid #3a3f47;border-radius:8px;overflow:hidden}
+  #paneTabs button{background:none;border:0;padding:9px 12px;font:600 13px/1 var(--sans);color:#cfcabd;cursor:pointer;touch-action:manipulation}
+  #paneTabs button.on{background:var(--amber);color:var(--amber-ink)}
+  #map3dFrame{position:absolute;inset:0;width:100%;height:100%;border:0;display:none;background:#0d0f12}
+  #depthPane.m3d #map3dFrame{display:block}
+  #depthPane.m3d #depthImg, #depthPane.m3d #dBox, #depthPane.m3d #dInfo, #depthPane.m3d #dOff{display:none!important}
 
   @media (orientation:portrait) and (max-width:600px){
     #osdTL,#osdTR,#osdThr,#osdThrV,.hint,#state{display:none!important}
@@ -180,7 +188,9 @@
 <img id="view" alt="">
 <div id="novideo">ждём видео с машинки…</div>
 <div id="depthPane"><img id="depthImg" alt=""><div id="dBox"></div>
-  <button id="recBtn" disabled title="запись глубины и цвета для 3D-карты (SLAM)"><span class="rd">●</span> <span id="recTxt">запись 3D</span></button>
+  <iframe id="map3dFrame" title="живая 3D-карта"></iframe>
+  <div id="paneCtl"><div id="paneTabs"><button id="tabDepth" class="on">глубина</button><button id="tabMap">3D-карта</button></div>
+  <button id="recBtn" disabled title="запись глубины и цвета для 3D-карты (SLAM)"><span class="rd">●</span> <span id="recTxt">запись 3D</span></button></div>
   <div id="dInfo"><span class="lbl">ВПЕРЕДИ</span><span id="dAhead">—</span><span id="dMeta"></span></div>
   <div id="dOff">камера глубины не на связи</div></div>
 
@@ -196,7 +206,7 @@
   <button class="btn" id="gpBtn" style="display:none" title="геймпад подключён">геймпад</button>
   <button class="btn" id="resetBtn" style="display:none" title="на старт (R)">↺ старт</button>
   <button class="btn" id="depthBtn" title="второе окно: камера глубины (G)">глубина</button>
-  <a class="btn" href="/map3d.html" target="map3d" title="живая 3D-карта в отдельной вкладке" style="text-decoration:none;color:inherit">3D-карта</a>
+  <button class="btn" id="mapBtn" title="правое окно: живая 3D-карта и проходимость (M)">3D-карта</button>
   <button class="btn on" id="osdBtn" title="показания поверх видео (O)">OSD</button>
   <button class="btn" data-open="tele">телеметрия</button>
   <button class="btn" data-open="set">настройки</button>
@@ -553,6 +563,23 @@ function depthMsg(e){
   recState(m);
 }
 depthConnect();
+
+// ---------- правое окно: глубина или живая 3D-карта (та же /map3d.html, встроенная) ----------
+let paneTab = 'depth'; try { paneTab = localStorage.getItem('paneTab') || 'depth'; } catch {}
+function setTab(t){
+  paneTab = t; const m = t === 'map';
+  if (m && !$('#map3dFrame').src) $('#map3dFrame').src = '/map3d.html?embed=1';     // грузим только когда нужна
+  $('#depthPane').classList.toggle('m3d', m);
+  $('#tabDepth').classList.toggle('on', !m); $('#tabMap').classList.toggle('on', m);
+  $('#mapBtn').classList.toggle('on', m && splitOn);
+  try { localStorage.setItem('paneTab', t); } catch {}
+}
+$('#tabDepth').onclick = () => setTab('depth');
+$('#tabMap').onclick = () => setTab('map');
+$('#mapBtn').onclick = () => { if (splitOn && paneTab === 'map') { setSplit(false); setTab('map'); } else { setSplit(true); setTab('map'); } };
+addEventListener('keydown', e => { if (e.code === 'KeyM' && e.target.tagName !== 'INPUT') $('#mapBtn').click(); });
+$('#depthBtn').addEventListener('click', () => { if (splitOn) setTab('depth'); else $('#mapBtn').classList.remove('on'); });
+setTab(paneTab);
 
 // ---------- запись для 3D-карты: Pi 4 пишет глубину + цвет, пульт показывает ход в реальном времени ----------
 let recOn = false;

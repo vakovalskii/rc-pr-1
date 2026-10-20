@@ -58,6 +58,12 @@ class Tracker:
             self.key, self.Tkey = rgbd, self.T.copy(); return self.T, True
         return self.T, False
 
+    def correct(self, T_new):
+        """Поправка позы снаружи (плоскость, скан-матчинг): сдвигаем и ключевой кадр — одометрия дальше считает от исправленной позы."""
+        D = T_new @ np.linalg.inv(self.T)
+        self.T, self.Tkey = T_new.copy(), D @ self.Tkey
+        if self.poses: self.poses[-1] = T_new.copy()
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("dir")

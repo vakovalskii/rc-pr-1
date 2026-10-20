@@ -25,6 +25,7 @@ import open3d as o3d
 import aiohttp
 from PIL import Image
 from slam import Tracker
+from scan2d import Scan2D, planar, pose_T
 
 ROOT = pathlib.Path(__file__).parent
 
@@ -107,6 +108,7 @@ class Live:
     def reset(self, rec):
         self.tr, self.cam_i, self.seen, self.pts, self.path, self.n, self.t0 = None, None, set(), 0, [], 0, time.time()
         self.traj_up = None; self.grid = Grid(self.a); self.grid_at = 0; self.times = []
+        self.scan2d = None; self.match_scores = []
         self.dir = ROOT / "data" / f"live-{time.strftime('%Y%m%d-%H%M%S')}{'-' + rec if rec else ''}"
         (self.dir / "raw" / "depth").mkdir(parents=True, exist_ok=True); (self.dir / "raw" / "color").mkdir(exist_ok=True)
         print("сеанс:", self.dir)
@@ -137,6 +139,16 @@ class Live:
             o3d.geometry.Image(np.ascontiguousarray(rgb)), o3d.geometry.Image(np.ascontiguousarray(z)),
             depth_scale=1.0 / meta["depth_scale"], depth_trunc=a.depth_max, convert_rgb_to_intensity=False)
         T, is_key = self.tr.step(rgbd); self.n += 1
+        if getattr(a, "planar", False):                   # машинка на полу: только x, y, курс — остальное ошибка одометрии
+            T, (x, y, yaw) = planar(T, self.grid.R)
+            if getattr(a, "scan", False):                 # и «пришпилить» кадр к 2D-карте, как лидар
+                if self.scan2d is None: self.scan2d = Scan2D(self.grid.R, a.cam_height, (a.z_min, a.z_max), a.res, a.grid_m)
+                pts = self.scan2d.scan(z.astype(np.float32) * meta["depth_scale"], meta["fx"], meta["fy"], meta["cx"], meta["cy"])
+                x, y, yaw, sc = self.scan2d.match(pts, x, y, yaw)
+                if sc is not None: self.match_scores.append(sc)
+                T = pose_T(x, y, yaw, self.grid.R)
+                self.scan2d.add(pts, x, y, yaw)
+            self.tr.correct(T)
         self.path.append(T[:3, 3].copy())
         chunk = None
         if is_key:
@@ -151,7 +163,7 @@ class Live:
                 mm = np.clip(xyz[new] * 1000, -32767, 32767).astype("<i2"); c8 = (col[new] * 255).astype(np.uint8)
                 chunk = b"P" + int(new.sum()).to_bytes(4, "little") + mm.tobytes() + c8.tobytes()
                 self.pts += int(new.sum())
-        if not self.freeze_up and self.n % 10 == 0 and len(self.path) > 20:   # «вверх» по плоскости траектории (как в slam.py)
+        if not self.freeze_up and not getattr(a, "planar", False) and self.n % 10 == 0 and len(self.path) > 20:   # «вверх» по плоскости траектории (как в slam.py)
             P = np.array(self.path); ev, evec = np.linalg.eigh(np.cov((P - P.mean(0)).T))
             if ev[2] > 0.3 ** 2 and ev[1] > 0.15 ** 2 and ev[0] < 0.03 ** 2:
                 self.traj_up = evec[:, 0] * (1 if evec[1, 0] < 0 else -1); self.grid.set_up(self.traj_up)
@@ -226,6 +238,8 @@ if __name__ == "__main__":
     p.add_argument("--z-max", type=float, default=0.35, help="м, выше — не мешает проехать")
     p.add_argument("--car-radius", type=float, default=0.15, help="м, полоса вокруг пути, которая точно свободна")
     p.add_argument("--max-points", type=int, default=1_500_000, help="больше точек в облако не шлём")
+    p.add_argument("--no-planar", dest="planar", action="store_false", help="не ограничивать позу плоскостью пола")
+    p.add_argument("--no-scan", dest="scan", action="store_false", help="без 2D-скан-матчинга")
     p.add_argument("--res", type=float, default=0.05, help="м, клетка сетки проходимости")
     p.add_argument("--grid-m", type=float, default=30, help="м, сторона сетки")
     asyncio.run(main(p.parse_args()))

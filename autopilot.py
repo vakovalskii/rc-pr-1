@@ -183,7 +183,8 @@ class Autopilot:
     def __init__(self, a, P):
         self.a, self.P = a, P
         self.live = Live(argparse.Namespace(voxel=0.04, depth_max=2.5, key_m=0.08, key_deg=8, pitch=25, cam_height=0.10,
-                                            z_min=0.04, z_max=0.35, car_radius=0.15, res=0.05, grid_m=30, max_points=1_500_000),
+                                            z_min=0.04, z_max=0.35, car_radius=0.15, res=0.05, grid_m=30, max_points=1_500_000,
+                                            planar=True, scan=True),
                          freeze_up=True)
         self.mem = Memory(); self.pose = None; self.pose_t = 0; self.pose_hist = []; self.home = None
         self.stats = None; self.stats_t = 0; self.tele = {}

@@ -65,6 +65,8 @@ bool failsafe = true;
 int pot = 0, motorOut = 0, escUs = 1500;
 float thrOut = 0;                                          // газ после рампы, -1000..1000
 int lastSign = 0; uint32_t zeroSince = 0, brakeUntil = 0;
+float speedEst = 0;                                          // оценка скорости вперёд в единицах газа (0..maxThr)
+const float SPEED_TAU_MS = 500;
 const uint32_t FLIP_HOLD_MS = 150, FAILSAFE_STOP_MS = 150;
 const char* src = "-";
 
@@ -89,8 +91,13 @@ void control() {
   // активный тормоз: газ вперёд отпустили (или потянули назад, или failsafe) — регулятору на brakeMs импульс
   // «назад» силой brakeUs: автомобильный регулятор после хода вперёд понимает его как тормоз, а не задний ход.
   // Без него машинка просто катится (накат ~20 см на 18%).
-  if (cfg.brakeUs > 0 && cfg.brakeMs > 0 && target <= 0 && thrOut > 40 && !brakeUntil) {
-    brakeUntil = now + cfg.brakeMs; thrOut = 0;
+  // Датчика скорости нет, поэтому скорость оцениваем по газу: машинка разгоняется к скорости, пропорциональной
+  // газу, примерно за SPEED_TAU_MS. Тормоз длится brakeMs × (оценка скорости / потолок газа): короткий проезд —
+  // короткий тормоз. Регулятор у нас «вперёд/назад» без тормоза, и лишний импульс он выполняет как задний ход.
+  speedEst += (max(thrOut, 0.0f) - speedEst) * 10.0f / SPEED_TAU_MS;   // такт control() — 10 мс
+  if (cfg.brakeUs > 0 && cfg.brakeMs > 0 && target <= 0 && speedEst > 25 && !brakeUntil) {
+    float k = min(1.0f, speedEst / max((float)cfg.maxThr, 1.0f));
+    brakeUntil = now + max((uint32_t)1, (uint32_t)(cfg.brakeMs * k)); thrOut = 0; speedEst = 0;
   }
   bool braked = false;
   if (brakeUntil) {

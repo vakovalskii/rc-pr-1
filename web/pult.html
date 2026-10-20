@@ -301,6 +301,12 @@
   <div class="row"><label for="brk">Торможение</label><output id="brkV"></output>
     <input type="range" id="brk" min="100" max="4000" step="100" data-esp="brk">
     <small>Время от полного газа до остановки. Меньше — резче.</small></div>
+  <div class="row"><label for="brakeUs">Тормоз: сила</label><output id="brakeUsV"></output>
+    <input type="range" id="brakeUs" min="0" max="300" step="10" data-esp="brake">
+    <small>Отпустил газ после езды вперёд — короткий задний ход, чтобы встать. 0 — без тормоза, просто накат.</small></div>
+  <div class="row"><label for="brakeMs">Тормоз: время</label><output id="brakeMsV"></output>
+    <input type="range" id="brakeMs" min="0" max="600" step="10" data-esp="brake">
+    <small>Сколько тормозить после полного разгона; после короткого проезда — меньше. Откатывается назад — убавь.</small></div>
   <div class="row"><label for="thrExpo">Мягкость у нуля</label><output id="thrExpoV"></output>
     <input type="range" id="thrExpo" min="0" max="100" step="5" data-local>
     <small>Экспонента: чем больше, тем точнее малый газ, полный ход стика остаётся полным.</small></div>
@@ -660,8 +666,9 @@ const FMT = {
   maxThr: v => Math.round(v / 10) + '%', acc: v => (v / 1000).toFixed(1) + ' с', brk: v => (v / 1000).toFixed(1) + ' с',
   pwm: v => Math.round(v / 10) + '%', kp: v => v, thrExpo: v => v + '%', steerExpo: v => v + '%',
   kbThr: v => v + '%', kbRate: v => v + '%',
+  brakeUs: v => v ? Math.round(v / 5) + '% назад' : 'выкл', brakeMs: v => v + ' мс',
 };
-const ESPKEY = {maxThr: 'max_thr', acc: 'acc_ms', brk: 'brk_ms', pwm: 'steer_pwm_max', kp: 'steer_kp'};
+const ESPKEY = {maxThr: 'max_thr', acc: 'acc_ms', brk: 'brk_ms', pwm: 'steer_pwm_max', kp: 'steer_kp', brakeUs: 'brake_us', brakeMs: 'brake_ms'};
 const touched = {};   // слайдер, который двигали недавно, телеметрия не перетирает
 $$('input[type=range]').forEach(r => {
   const show = () => { $('#' + r.id + 'V').textContent = FMT[r.id](+r.value); };
@@ -670,11 +677,15 @@ $$('input[type=range]').forEach(r => {
     show(); touched[r.id] = performance.now();
     if (r.dataset.local !== undefined) { cfg[r.id] = +r.value; saveLocal(); }
   });
-  r.addEventListener('change', () => { if (r.dataset.esp) espCmd(`${r.dataset.esp},${r.value}`); touched[r.id] = performance.now(); });
+  r.addEventListener('change', () => {
+    if (r.dataset.esp === 'brake') espCmd(`brake,${$('#brakeUs').value},${$('#brakeMs').value}`);   // одна команда на оба
+    else if (r.dataset.esp) espCmd(`${r.dataset.esp},${r.value}`);
+    touched[r.id] = performance.now();
+  });
 });
 function syncEsp(m){
   for (const [id, k] of Object.entries(ESPKEY)) {
-    const r = $('#' + id); if (m[k] === undefined) { r.closest('.row').style.display = id === 'pwm' || id === 'kp' ? 'none' : ''; continue; }
+    const r = $('#' + id); if (m[k] === undefined) { r.closest('.row').style.display = ['pwm', 'kp', 'brakeUs', 'brakeMs'].includes(id) ? 'none' : ''; continue; }
     r.closest('.row').style.display = '';
     if (performance.now() - (touched[id] || 0) < 1500) continue;
     r.value = m[k]; $('#' + id + 'V').textContent = FMT[id](m[k]);

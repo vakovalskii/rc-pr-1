@@ -3,7 +3,7 @@
 #   firmware/flash_via_zero.sh            — собрать rc_esp и прошить
 #   firmware/flash_via_zero.sh probe      — только проверить, что малина видит загрузчик ESP
 set -e
-ZERO=${ZERO:-pi@192.168.1.137}
+ZERO=${ZERO:-pi@pizero2w.local}
 cd "$(dirname "$0")"
 if [ "$1" = "probe" ]; then ssh "$ZERO" '~/rc/esp_flash.sh probe'; exit; fi
 OUT=$(mktemp -d)

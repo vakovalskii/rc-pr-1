@@ -112,6 +112,8 @@ class EspDrive:
                                  "max_thr": int(p[11]), "esp_src": p[12], "acc_ms": int(p[13]), "brk_ms": int(p[14])}
                     if len(p) >= 18:                       # прошивка с настройкой силы руля
                         self.tele.update(steer_pwm_max=int(p[15]), steer_kp=int(p[16]), steer_min_pwm=int(p[17]))
+                    if len(p) >= 20:                       # прошивка с активным тормозом
+                        self.tele.update(brake_us=int(p[18]), brake_ms=int(p[19]))
                     self.tele_at = time.monotonic()
                 except ValueError: pass
             elif line and not line.startswith("t,"):
@@ -120,7 +122,7 @@ class EspDrive:
     def us(self):
         return self.tele.get("esc_us", 1500), 1500
 
-    ALLOWED = ("mode,", "cal,", "inv", "max,", "acc,", "brk,", "pwm,", "kp,", "minpwm,")
+    ALLOWED = ("mode,", "cal,", "inv", "max,", "acc,", "brk,", "pwm,", "kp,", "minpwm,", "brake,")
     def raw(self, cmd):
         """Настройки ESP с пульта: режим руля, калибровка, инверсия, потолок газа, рампы."""
         cmd = str(cmd).strip()

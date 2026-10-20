@@ -18,7 +18,8 @@
 //   c,<id>,<руль -1000..1000>,<газ -1000..1000>    команда, 20 Гц
 //   mode,<0|1|2>  cal,<l|c|r>  inv  max,<0..1000>  acc,<мс>  brk,<мс>  калибровка и настройки
 //   pwm,<200..1000> сила руля (потолок ШИМ моторчика)   kp,<1..30> жёсткость удержания   minpwm,<0..800>
-// Ответ: t,<ack>,<pot>,<esc_us>,<мотор>,<failsafe>,<mode>,<potL>,<potC>,<potR>,<inv>,<max>,<источник>,<разгон мс>,<торможение мс>,<pwm>,<kp>,<minpwm>
+//   brake,<мкс>,<мс>  активный тормоз при отпускании газа (импульс «назад» силой мкс на мс; 0 — выкл)
+// Ответ: t,<ack>,<pot>,<esc_us>,<мотор>,<failsafe>,<mode>,<potL>,<potC>,<potR>,<inv>,<max>,<источник>,<разгон мс>,<торможение мс>,<pwm>,<kp>,<minpwm>,<тормоз мкс>,<тормоз мс>
 
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
@@ -34,13 +35,19 @@ const char* AP_PASS = "12345678";
 const int PIN_ESC = 5, PIN_IN1 = 14, PIN_IN2 = 12, PIN_LED = 2;
 const uint32_t FAILSAFE_MS = 300;
 
-struct Cfg { uint32_t magic; int16_t potL, potC, potR; uint8_t inv, mode; int16_t maxThr, kp, db, maxPwm, minPwm, accMs, brkMs; };
+struct Cfg { uint32_t magic; int16_t potL, potC, potR; uint8_t inv, mode; int16_t maxThr, kp, db, maxPwm, minPwm, accMs, brkMs;
+             int16_t brakeUs, brakeMs; };                  // активный тормоз: дописан в конец — калибровка в EEPROM сохраняется
 const uint32_t MAGIC = 0xB0661E03;
 Cfg cfg;
 
 // accMs/brkMs: за сколько мс газ прошёл бы всю шкалу 0..100% при разгоне и при торможении
-void cfgDefaults() { cfg = {MAGIC, -1, -1, -1, 0, 0, 300, 4, 12, 700, 250, 600, 1500}; }
-void cfgLoad() { EEPROM.begin(64); EEPROM.get(0, cfg); if (cfg.magic != MAGIC) cfgDefaults(); }
+void cfgDefaults() { cfg = {MAGIC, -1, -1, -1, 0, 0, 300, 4, 12, 700, 250, 600, 1500, 150, 300}; }
+void cfgLoad() {
+  EEPROM.begin(64); EEPROM.get(0, cfg);
+  if (cfg.magic != MAGIC) cfgDefaults();
+  if (cfg.brakeUs < 0 || cfg.brakeUs > 400) cfg.brakeUs = 150;   // EEPROM от прошлой прошивки: полей тормоза ещё не было
+  if (cfg.brakeMs < 0 || cfg.brakeMs > 1500) cfg.brakeMs = 300;
+}
 void cfgSave() { EEPROM.put(0, cfg); EEPROM.commit(); }
 bool calibrated() { return cfg.potL >= 0 && cfg.potC >= 0 && cfg.potR >= 0 && abs(cfg.potR - cfg.potL) > 60; }
 
@@ -57,7 +64,7 @@ const int CENTER_DB = 30;                                    // |стик| < 3% 
 bool failsafe = true;
 int pot = 0, motorOut = 0, escUs = 1500;
 float thrOut = 0;                                          // газ после рампы, -1000..1000
-int lastSign = 0; uint32_t zeroSince = 0;
+int lastSign = 0; uint32_t zeroSince = 0, brakeUntil = 0;
 const uint32_t FLIP_HOLD_MS = 150, FAILSAFE_STOP_MS = 150;
 const char* src = "-";
 
@@ -79,6 +86,21 @@ void control() {
   if (tsign && lastSign && tsign != lastSign) {
     if (thrOut != 0 || now - zeroSince < FLIP_HOLD_MS) target = 0;
   }
+  // активный тормоз: газ вперёд отпустили (или потянули назад, или failsafe) — регулятору на brakeMs импульс
+  // «назад» силой brakeUs: автомобильный регулятор после хода вперёд понимает его как тормоз, а не задний ход.
+  // Без него машинка просто катится (накат ~20 см на 18%).
+  if (cfg.brakeUs > 0 && cfg.brakeMs > 0 && target <= 0 && thrOut > 40 && !brakeUntil) {
+    brakeUntil = now + cfg.brakeMs; thrOut = 0;
+  }
+  bool braked = false;
+  if (brakeUntil) {
+    if (target > 0 || now >= brakeUntil) { brakeUntil = 0; zeroSince = now; }   // снова газ — тормоз снят; отжали — нейтраль
+    else {
+      escUs = 1500 - cfg.brakeUs; esc.writeMicroseconds(escUs);
+      lastSign = 1; zeroSince = now; braked = true;        // после тормоза задний ход — как обычно, через нейтраль
+    }
+  }
+  if (!braked) {
   // рампа: разгон и торможение с разной скоростью; failsafe гасит быстро
   bool braking = abs(target) < fabsf(thrOut) || (target > 0) != (thrOut > 0);
   float ms = failsafe ? FAILSAFE_STOP_MS : (braking ? cfg.brkMs : cfg.accMs);
@@ -89,6 +111,7 @@ void control() {
   if (thrOut == 0 && zeroSince && now - zeroSince >= FLIP_HOLD_MS) lastSign = 0;
   escUs = 1500 + (int)(thrOut / 2);                          // ±1000 -> ±500 мкс
   esc.writeMicroseconds(escUs);
+  }
 
   pot = readPot();
   int steer = failsafe ? 0 : cmdSteer, out = 0;
@@ -142,6 +165,10 @@ void handle(char* s, const char* from) {
   else if (!strncmp(s, "max,", 4)) { cfg.maxThr = constrain(atoi(s + 4), 0, 1000); cfgSave(); }
   else if (!strncmp(s, "acc,", 4)) { cfg.accMs = constrain(atoi(s + 4), 50, 5000); cfgSave(); }
   else if (!strncmp(s, "brk,", 4)) { cfg.brkMs = constrain(atoi(s + 4), 50, 5000); cfgSave(); }
+  else if (!strncmp(s, "brake,", 6)) {                     // brake,<мкс 0..400>,<мс 0..1500>  (0 — без тормоза)
+    const char* c = strchr(s + 6, ',');
+    cfg.brakeUs = constrain(atoi(s + 6), 0, 400); if (c) cfg.brakeMs = constrain(atoi(c + 1), 0, 1500); cfgSave();
+  }
   else if (!strncmp(s, "pwm,", 4)) { cfg.maxPwm = constrain(atoi(s + 4), 200, 1000); cfgSave(); }
   else if (!strncmp(s, "kp,", 3)) { cfg.kp = constrain(atoi(s + 3), 1, 30); cfgSave(); }
   else if (!strncmp(s, "minpwm,", 7)) { cfg.minPwm = constrain(atoi(s + 7), 0, 800); cfgSave(); }
@@ -150,8 +177,8 @@ void handle(char* s, const char* from) {
 
 String tele() {
   char b[160];
-  snprintf(b, sizeof b, "t,%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d,%d,%d,%d", (long)lastId, pot, escUs, motorOut, failsafe,
-           cfg.mode, cfg.potL, cfg.potC, cfg.potR, cfg.inv, cfg.maxThr, src, cfg.accMs, cfg.brkMs, cfg.maxPwm, cfg.kp, cfg.minPwm);
+  snprintf(b, sizeof b, "t,%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d,%d,%d,%d,%d,%d", (long)lastId, pot, escUs, motorOut, failsafe,
+           cfg.mode, cfg.potL, cfg.potC, cfg.potR, cfg.inv, cfg.maxThr, src, cfg.accMs, cfg.brkMs, cfg.maxPwm, cfg.kp, cfg.minPwm, cfg.brakeUs, cfg.brakeMs);
   return String(b);
 }
 

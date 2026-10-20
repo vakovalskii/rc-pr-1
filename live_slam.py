@@ -105,10 +105,15 @@ class Live:
 
     def reset(self, rec):
         self.tr, self.cam_i, self.seen, self.pts, self.path, self.n, self.t0 = None, None, set(), 0, [], 0, time.time()
-        self.traj_up = None; self.grid = Grid(self.a); self.grid_at = 0
+        self.traj_up = None; self.grid = Grid(self.a); self.grid_at = 0; self.times = []
         self.dir = ROOT / "data" / f"live-{time.strftime('%Y%m%d-%H%M%S')}{'-' + rec if rec else ''}"
         (self.dir / "raw" / "depth").mkdir(parents=True, exist_ok=True); (self.dir / "raw" / "color").mkdir(exist_ok=True)
         print("сеанс:", self.dir)
+
+    def rate(self):
+        """к/с за последние ~20 кадров (время от запуска сюда не годится: машинка могла быть выключена)."""
+        self.times.append(time.time()); self.times = self.times[-20:]
+        return round((len(self.times) - 1) / max(self.times[-1] - self.times[0], 1e-3), 1) if len(self.times) > 1 else 0.0
 
     def up(self):
         if self.traj_up is not None: return self.traj_up
@@ -160,7 +165,7 @@ class Live:
         tr = self.tr
         pose = {"type": "pose", "up": self.up().round(4).tolist(), "T": T.reshape(-1).round(4).tolist(), "kf": int(is_key),
                 "lost": tr.lost, "jumps": tr.jumps, "pts": self.pts, "frames": self.n,
-                "fps": round(self.n / max(time.time() - self.t0, 1e-3), 1), "lag_ms": round((time.time() - meta["t"]) * 1000)}
+                "fps": self.rate(), "lag_ms": round((time.time() - meta["t"]) * 1000)}
         return chunk, grid, pose
 
 async def depth_url(s, relay):

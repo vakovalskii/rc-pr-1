@@ -191,7 +191,8 @@ async def ws_depthview(request):                   # зрители: пульт�
 # --- живая 3D-карта: live_slam.py (на маке) шлёт сюда куски облака и позу, страницы /map3d.html смотрят.
 # Куски облака копим, чтобы вкладка, открытая посреди проезда, сразу получила всё, что уже собрано.
 # Сетка проходимости (b"G") — только последняя, и она же пишется в папку карты: map.html и минимапа видят её сразу.
-map3d = {"chunks": [], "pose": None, "grid": None, "viewers": set(), "dir": None}
+map3d = {"chunks": [], "bytes": 0, "pose": None, "grid": None, "viewers": set(), "dir": None}
+MAP3D_MAX = 20 << 20                               # ~2 млн точек
 
 def save_grid(b):
     if not map3d["dir"]: return
@@ -213,10 +214,12 @@ async def ws_map3d(request):                       # источник: live_slam
             map3d["grid"] = msg.data
             try: save_grid(msg.data)
             except Exception as e: print("[map3d] не записал карту:", e)
-        elif binary: map3d["chunks"].append(msg.data)
+        elif binary:
+            if map3d["bytes"] + len(msg.data) > MAP3D_MAX: continue    # у Zero 416 МБ на всё: дальше не копим
+            map3d["chunks"].append(msg.data); map3d["bytes"] += len(msg.data)
         else:
             m = json.loads(msg.data)
-            if m.get("type") == "reset": map3d["chunks"].clear(); map3d["grid"] = None
+            if m.get("type") == "reset": map3d["chunks"].clear(); map3d["grid"] = None; map3d["bytes"] = 0
             if m.get("type") == "pose": map3d["pose"] = msg.data
         for v in list(map3d["viewers"]): asyncio.ensure_future(_m3_send(v, msg.data, binary))
     print("[map3d] SLAM отключился")

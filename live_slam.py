@@ -146,7 +146,7 @@ class Live:
             keys = (k[:, 0] + 50000) * 10 ** 10 + (k[:, 1] + 50000) * 10 ** 5 + (k[:, 2] + 50000)
             new = np.array([q not in self.seen for q in keys.tolist()], bool)
             self.seen.update(keys[new].tolist())
-            if new.any():
+            if new.any() and self.pts < a.max_points:          # предел: зритель и релей на Zero не резиновые
                 mm = np.clip(xyz[new] * 1000, -32767, 32767).astype("<i2"); c8 = (col[new] * 255).astype(np.uint8)
                 chunk = b"P" + int(new.sum()).to_bytes(4, "little") + mm.tobytes() + c8.tobytes()
                 self.pts += int(new.sum())
@@ -224,6 +224,7 @@ if __name__ == "__main__":
     p.add_argument("--z-min", type=float, default=0.04, help="м, ниже — пол")
     p.add_argument("--z-max", type=float, default=0.35, help="м, выше — не мешает проехать")
     p.add_argument("--car-radius", type=float, default=0.15, help="м, полоса вокруг пути, которая точно свободна")
+    p.add_argument("--max-points", type=int, default=1_500_000, help="больше точек в облако не шлём")
     p.add_argument("--res", type=float, default=0.05, help="м, клетка сетки проходимости")
     p.add_argument("--grid-m", type=float, default=30, help="м, сторона сетки")
     asyncio.run(main(p.parse_args()))

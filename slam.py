@@ -17,13 +17,19 @@ import argparse, json, math, pathlib, time
 import numpy as np
 import open3d as o3d
 
+def _deg(M):
+    """Угол поворота 4x4 в градусах."""
+    return math.degrees(math.acos(max(-1, min(1, (np.trace(M[:3, :3]) - 1) / 2))))
+
 class Tracker:
     """Одометрия против ключевого кадра (а не соседнего) — меньше копится дрейф. Новый ключ — когда
     отъехали на key_m или повернулись на key_deg. Начальное приближение — движение прошлого шага.
-    Потеряли трекинг — стоим на месте; потеряли reset_after раз подряд (уехали далеко от ключа) —
+    Шаг больше max_step_m / max_step_deg за кадр считаем ошибкой (было: одна плохая оценка разогнала
+    модель скорости, и поза за минуту «уехала» на 236 м). Потеряли трекинг — стоим на месте; потеряли reset_after раз подряд (уехали далеко от ключа) —
     текущий кадр становится новым ключом в старой позе: карта не обрывается, но здесь возможен скачок."""
-    def __init__(self, cam_i, depth_max, key_m=0.10, key_deg=10, reset_after=5):
+    def __init__(self, cam_i, depth_max, key_m=0.10, key_deg=10, reset_after=5, max_step_m=0.25, max_step_deg=25):
         self.cam_i, self.key_m, self.key_deg, self.reset_after = cam_i, key_m, key_deg, reset_after
+        self.max_step_m, self.max_step_deg = max_step_m, max_step_deg
         self.opt = o3d.pipelines.odometry.OdometryOption(depth_diff_max=0.07, depth_min=0.2, depth_max=depth_max)
         self.jac = o3d.pipelines.odometry.RGBDOdometryJacobianFromHybridTerm()
         self.T, self.key, self.Tkey, self.dT = np.eye(4), None, np.eye(4), np.eye(4)
@@ -35,7 +41,11 @@ class Tracker:
             self.key = rgbd; self.poses.append(self.T.copy()); return self.T, True
         init = np.linalg.inv(self.Tkey) @ self.T @ self.dT
         ok, rel, _ = o3d.pipelines.odometry.compute_rgbd_odometry(rgbd, self.key, self.cam_i, init, self.jac, self.opt)
+        if ok:   # шаг больше, чем машинка может проехать за кадр, — ошибка одометрии, а не движение
+            step = np.linalg.inv(self.T) @ (self.Tkey @ rel)
+            ok = np.linalg.norm(step[:3, 3]) <= self.max_step_m and _deg(step) <= self.max_step_deg
         if not ok:
+            self.dT = np.eye(4)                          # иначе плохая скорость сама себя разгоняет
             self.lost += 1; self.miss += 1; self.poses.append(self.T.copy())
             if self.miss >= self.reset_after:
                 self.key, self.Tkey, self.dT, self.miss = rgbd, self.T.copy(), np.eye(4), 0; self.jumps += 1
@@ -44,8 +54,7 @@ class Tracker:
         Tn = self.Tkey @ rel; self.dT = np.linalg.inv(self.T) @ Tn; self.T = Tn
         self.poses.append(self.T.copy())
         d = np.linalg.inv(self.Tkey) @ self.T
-        ang = math.degrees(math.acos(max(-1, min(1, (np.trace(d[:3, :3]) - 1) / 2))))
-        if np.linalg.norm(d[:3, 3]) > self.key_m or ang > self.key_deg:
+        if np.linalg.norm(d[:3, 3]) > self.key_m or _deg(d) > self.key_deg:
             self.key, self.Tkey = rgbd, self.T.copy(); return self.T, True
         return self.T, False
 
@@ -55,6 +64,7 @@ def main():
     p.add_argument("--step", type=int, default=2, help="брать каждый N-й кадр (запись 15 к/с)")
     p.add_argument("--voxel", type=float, default=0.02, help="м, прореживание облака")
     p.add_argument("--depth-max", type=float, default=3.0, help="м, дальше глубина D455 на 640x480 шумная")
+    p.add_argument("--pitch", type=float, default=25, help="°, на сколько камера смотрит вверх — если «вверх» не взять из траектории")
     p.add_argument("--cam-height", type=float, default=0.10, help="м, высота RealSense над полом, если пол не виден")
     a = p.parse_args()
 
@@ -88,12 +98,12 @@ def main():
     # (камера на D455 смотрит заметно вверх, пол в кадре бывает только краем). Короткая запись без
     # разъезда — берём «вверх» первой камеры.
     P = np.array([q[:3, 3] for q in poses])
-    cam_up = np.array([0, -1.0, 0])
+    th = math.radians(a.pitch); cam_up = np.array([0, -math.cos(th), math.sin(th)])   # камера смотрит вверх на pitch
     ev, evec = np.linalg.eigh(np.cov((P - P.mean(0)).T)) if len(P) > 3 else (np.zeros(3), np.eye(3))
-    if ev[2] > 0.3 ** 2 and ev[1] > 0.15 ** 2 and ev[0] < 0.03 ** 2:     # разъезд в две стороны, по высоте ровно
+    if ev[2] > 0.3 ** 2 and ev[1] > 0.15 ** 2 and ev[0] < 0.05 ** 2:     # разъезд в две стороны, по высоте ровно
         n = evec[:, 0] * (1 if evec[:, 0] @ cam_up > 0 else -1); up_src = "траектория"
     else:
-        n = cam_up; up_src = "первая камера (разъезда мало)"
+        n = cam_up; up_src = f"наклон камеры {a.pitch}° (разъезда мало или траектория не плоская)"
     # пол: плоскость с этой нормалью ниже камеры на 3–40 см; не нашли — высота камеры из параметра
     rest, D, floor_src = pcd.voxel_down_sample(0.03), a.cam_height, "параметр --cam-height"
     for _ in range(6):

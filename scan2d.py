@@ -72,19 +72,20 @@ class Scan2D:
         if len(pts) < 40 or (self.hits >= 2).sum() < 150: return x, y, yaw, None
         F = self._field()
         best = (x, y, yaw, -1.0)
-        for wxy, sxy, wdeg, sdeg in ((win_xy, 0.03, win_deg, 1.5), (0.03, 0.01, 1.5, 0.5)):
+        coarse = (win_xy, 0.03, win_deg, 1.5) if win_xy <= 0.15 else (win_xy, 0.05, win_deg, 3.0)   # широкое окно — грубее шаг
+        for wxy, sxy, wdeg, sdeg in (coarse, (0.05, 0.01, 2.0, 0.5)):
             bx, by, byaw = best[:3]
             dxs = np.arange(-wxy, wxy + 1e-9, sxy); das = np.radians(np.arange(-wdeg, wdeg + 1e-9, sdeg))
-            for da in das:
+            for da in das:                                # все сдвиги одного поворота разом: (dy, dx, точка)
                 yw = byaw + da; c, s = math.cos(yw), math.sin(yw)
                 W = np.stack([c * pts[:, 0] - s * pts[:, 1], s * pts[:, 0] + c * pts[:, 1]], 1)
-                for dx in dxs:
-                    cx = np.floor((W[:, 0] + bx + dx) / self.res).astype(int) + self.n // 2
-                    for dy in dxs:
-                        cy = np.floor((W[:, 1] + by + dy) / self.res).astype(int) + self.n // 2
-                        ok = (cx >= 0) & (cx < self.n) & (cy >= 0) & (cy < self.n)
-                        sc = F[cy[ok], cx[ok]].mean() if ok.any() else 0
-                        if sc > best[3]: best = (bx + dx, by + dy, yw, sc)
+                cx = np.floor((W[None, :, 0] + bx + dxs[:, None]) / self.res).astype(int) + self.n // 2
+                cy = np.floor((W[None, :, 1] + by + dxs[:, None]) / self.res).astype(int) + self.n // 2
+                okx, oky = (cx >= 0) & (cx < self.n), (cy >= 0) & (cy < self.n)
+                v = F[np.clip(cy, 0, self.n - 1)[:, None, :], np.clip(cx, 0, self.n - 1)[None, :, :]] * (oky[:, None, :] & okx[None, :, :])
+                sc = v.mean(2)                            # за краем сетки — ноль (раньше такие точки выбрасывались — почти не бывает)
+                iy, ix = np.unravel_index(int(sc.argmax()), sc.shape)
+                if sc[iy, ix] > best[3]: best = (bx + dxs[ix], by + dxs[iy], yw, float(sc[iy, ix]))
         # слабое совпадение (мало знакомых стен в кадре) — веры нет, остаёмся на одометрии
         if best[3] < 0.35: return x, y, yaw, best[3]
         self.last = (best[0] - x, best[1] - y, best[2] - yaw, best[3])

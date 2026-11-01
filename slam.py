@@ -35,17 +35,23 @@ class Tracker:
         self.T, self.key, self.Tkey, self.dT = np.eye(4), None, np.eye(4), np.eye(4)
         self.poses, self.lost, self.miss, self.jumps = [], 0, 0, 0
 
-    def step(self, rgbd):
-        """→ (поза камеры в мире первого кадра 4x4, ключевой ли это кадр — его точки надо добавить в облако)."""
+    def step(self, rgbd, rot=None):
+        """→ (поза камеры в мире первого кадра 4x4, ключевой ли это кадр — его точки надо добавить в облако).
+        rot — поворот камеры с прошлого кадра по гироскопу (3x3, в осях камеры): подсказка одометрии и поворот, если она сорвалась."""
         if self.key is None:
             self.key = rgbd; self.poses.append(self.T.copy()); return self.T, True
-        init = np.linalg.inv(self.Tkey) @ self.T @ self.dT
+        dT = self.dT.copy()
+        if rot is not None: dT[:3, :3] = rot
+        init = np.linalg.inv(self.Tkey) @ self.T @ dT
         ok, rel, _ = o3d.pipelines.odometry.compute_rgbd_odometry(rgbd, self.key, self.cam_i, init, self.jac, self.opt)
         if ok:   # шаг больше, чем машинка может проехать за кадр, — ошибка одометрии, а не движение
             step = np.linalg.inv(self.T) @ (self.Tkey @ rel)
             ok = np.linalg.norm(step[:3, 3]) <= self.max_step_m and _deg(step) <= self.max_step_deg
+            if ok and rot is not None:   # гироскоп живой: поворот камеры с ним расходится больше 8° — одометрия ошиблась
+                ok = _deg(step[:3, :3].T @ rot) <= 8
         if not ok:
             self.dT = np.eye(4)                          # иначе плохая скорость сама себя разгоняет
+            if rot is not None: self.T = self.T.copy(); self.T[:3, :3] = self.T[:3, :3] @ rot   # стоим, но поворот берём у гироскопа
             self.lost += 1; self.miss += 1; self.poses.append(self.T.copy())
             if self.miss >= self.reset_after:
                 self.key, self.Tkey, self.dT, self.miss = rgbd, self.T.copy(), np.eye(4), 0; self.jumps += 1

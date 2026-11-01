@@ -109,6 +109,7 @@ class Live:
         self.tr, self.cam_i, self.seen, self.pts, self.path, self.n, self.t0 = None, None, set(), 0, [], 0, time.time()
         self.traj_up = None; self.grid = Grid(self.a); self.grid_at = 0; self.times = []
         self.scan2d = None; self.match_scores = []
+        self.imu_up = None; self.imu_ups = []; self.prev_yaw = None; self.prev_imu_yaw = None; self.imu_fix = 0
         self.dir = ROOT / "data" / f"live-{time.strftime('%Y%m%d-%H%M%S')}{'-' + rec if rec else ''}"
         (self.dir / "raw" / "depth").mkdir(parents=True, exist_ok=True); (self.dir / "raw" / "color").mkdir(exist_ok=True)
         print("сеанс:", self.dir)
@@ -119,6 +120,7 @@ class Live:
         return round((len(self.times) - 1) / max(self.times[-1] - self.times[0], 1e-3), 1) if len(self.times) > 1 else 0.0
 
     def up(self):
+        if self.imu_up is not None: return self.imu_up          # гравитация из акселерометра D455 — лучше всего
         if self.traj_up is not None: return self.traj_up
         th = math.radians(self.a.pitch)                   # камера смотрит вверх на pitch: «вверх» в её системе
         return np.array([0, -math.cos(th), math.sin(th)])
@@ -127,9 +129,16 @@ class Live:
         """→ (кусок облака bytes или None, сетка bytes или None, поза dict)."""
         a = self.a
         z = np.asarray(Image.open(io.BytesIO(zpng)), np.uint16); rgb = np.asarray(Image.open(io.BytesIO(cjpg)).convert("RGB"))
+        im = meta.get("imu") if getattr(a, "imu", True) else None
+        if im and self.imu_up is None and 8 < im.get("g", 0) < 11.5:   # «вверх» — среднее по первым кадрам стоя (камера жёстко на шасси)
+            self.imu_ups.append(np.asarray(im["up"], float))
+            if len(self.imu_ups) >= 5 or self.tr is None:
+                u = np.mean(self.imu_ups, 0); self.imu_up = u / np.linalg.norm(u)
         if self.tr is None:
             self.cam_i = o3d.camera.PinholeCameraIntrinsic(meta["w"], meta["h"], meta["fx"], meta["fy"], meta["cx"], meta["cy"])
-            self.tr = Tracker(self.cam_i, a.depth_max, key_m=a.key_m, key_deg=a.key_deg)
+            # одометрия на половине кадра (160x120) — в 4 раза быстрее, на Pi 4 это ~0.1 с вместо 0.4; облако — с полного кадра
+            self.cam_o = o3d.camera.PinholeCameraIntrinsic(meta["w"] // 2, meta["h"] // 2, meta["fx"] / 2, meta["fy"] / 2, meta["cx"] / 2, meta["cy"] / 2)
+            self.tr = Tracker(self.cam_o, a.depth_max, key_m=a.key_m, key_deg=a.key_deg)
             (self.dir / "raw" / "intrinsics.json").write_text(json.dumps({"width": meta["w"], "height": meta["h"], "fx": meta["fx"],
                 "fy": meta["fy"], "cx": meta["cx"], "cy": meta["cy"], "depth_scale": meta["depth_scale"]}))
             self.grid.set_up(self.up())
@@ -138,17 +147,33 @@ class Live:
         rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
             o3d.geometry.Image(np.ascontiguousarray(rgb)), o3d.geometry.Image(np.ascontiguousarray(z)),
             depth_scale=1.0 / meta["depth_scale"], depth_trunc=a.depth_max, convert_rgb_to_intensity=False)
-        T, is_key = self.tr.step(rgbd); self.n += 1
+        rgbd_o = o3d.geometry.RGBDImage.create_from_color_and_depth(
+            o3d.geometry.Image(np.ascontiguousarray(rgb[::2, ::2])), o3d.geometry.Image(np.ascontiguousarray(z[::2, ::2])),
+            depth_scale=1.0 / meta["depth_scale"], depth_trunc=a.depth_max, convert_rgb_to_intensity=False)
+        rot = None                                        # поворот с прошлого кадра по гироскопу — вокруг «вверх» в осях камеры
+        if im and self.imu_up is not None and self.prev_imu_yaw is not None:
+            rot = rot_axis(self.imu_up, math.radians(im["yaw"] - self.prev_imu_yaw))
+        T, is_key = self.tr.step(rgbd_o, rot); self.n += 1
         if getattr(a, "planar", False):                   # машинка на полу: только x, y, курс — остальное ошибка одометрии
             T, (x, y, yaw) = planar(T, self.grid.R)
+            # курс — по гироскопу всегда: камера в упор к стене (ближе 0.4 м D455 слепа) и на разворотах путает поворот,
+            # гироскоп нет (дрейф ~2°/мин, его снимает подгонка по стенам ниже). imu_fix — сколько раз камера ошиблась больше 4°
+            if im and self.prev_yaw is not None and self.prev_imu_yaw is not None:
+                pred = self.prev_yaw + math.radians(im["yaw"] - self.prev_imu_yaw)
+                if abs((yaw - pred + math.pi) % (2 * math.pi) - math.pi) > math.radians(4): self.imu_fix += 1
+                yaw = pred
             if getattr(a, "scan", False):                 # и «пришпилить» кадр к 2D-карте, как лидар
                 if self.scan2d is None: self.scan2d = Scan2D(self.grid.R, a.cam_height, (a.z_min, a.z_max), a.res, a.grid_m)
                 pts = self.scan2d.scan(z.astype(np.float32) * meta["depth_scale"], meta["fx"], meta["fy"], meta["cx"], meta["cy"])
-                x, y, yaw, sc = self.scan2d.match(pts, x, y, yaw)
+                lost = self.tr.miss > 0 or self.n - getattr(self, "lost_at", -99) < 5   # одометрия только что срывалась — ищем шире
+                if self.tr.miss > 0: self.lost_at = self.n
+                x, y, yaw, sc = self.scan2d.match(pts, x, y, yaw, *((0.30, 12.0) if lost else ()))
                 if sc is not None: self.match_scores.append(sc)
                 T = pose_T(x, y, yaw, self.grid.R)
                 self.scan2d.add(pts, x, y, yaw)
+            else: T = pose_T(x, y, yaw, self.grid.R)
             self.tr.correct(T)
+            self.prev_yaw = yaw; self.prev_imu_yaw = im["yaw"] if im else None
         self.path.append(T[:3, 3].copy())
         chunk = None
         if is_key:
@@ -177,9 +202,14 @@ class Live:
             self.grid.dirty, self.grid_at = False, time.time()
         tr = self.tr
         pose = {"type": "pose", "up": self.up().round(4).tolist(), "T": T.reshape(-1).round(4).tolist(), "kf": int(is_key),
-                "lost": tr.lost, "jumps": tr.jumps, "pts": self.pts, "frames": self.n,
+                "lost": tr.lost, "jumps": tr.jumps, "imu_fix": self.imu_fix, "imu": self.imu_up is not None, "pts": self.pts, "frames": self.n,
                 "fps": self.rate(), "lag_ms": round((time.time() - meta["t"]) * 1000)}
         return chunk, grid, pose
+
+def rot_axis(u, ang):
+    """Поворот на ang (рад) вокруг единичной оси u, против часовой, если смотреть с конца u (Родриг)."""
+    K = np.array([[0, -u[2], u[1]], [u[2], 0, -u[0]], [-u[1], u[0], 0]])
+    return np.eye(3) + math.sin(ang) * K + (1 - math.cos(ang)) * K @ K
 
 async def depth_url(s, relay):
     async with s.ws_connect(f"{relay}/ws/depthview") as ws:
@@ -226,7 +256,7 @@ async def main(a):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--relay", default="http://pizero2w.local:8080")
+    p.add_argument("--relay", default="http://raspberrypi.local:8080")
     p.add_argument("--pi4", help="адрес depth_cam, например ws://192.168.1.109:8090/ (по умолчанию спросить у релея)")
     p.add_argument("--voxel", type=float, default=0.04, help="м, шаг облака для показа")
     p.add_argument("--depth-max", type=float, default=2.5, help="м, дальше глубина D455 шумит и мажет карту")
@@ -240,6 +270,7 @@ if __name__ == "__main__":
     p.add_argument("--max-points", type=int, default=1_500_000, help="больше точек в облако не шлём")
     p.add_argument("--no-planar", dest="planar", action="store_false", help="не ограничивать позу плоскостью пола")
     p.add_argument("--no-scan", dest="scan", action="store_false", help="без 2D-скан-матчинга")
+    p.add_argument("--no-imu", dest="imu", action="store_false", help="не брать гравитацию и гироскоп D455")
     p.add_argument("--res", type=float, default=0.05, help="м, клетка сетки проходимости")
     p.add_argument("--grid-m", type=float, default=30, help="м, сторона сетки")
     asyncio.run(main(p.parse_args()))

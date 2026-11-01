@@ -1,7 +1,7 @@
 """
 Камера глубины RealSense (D455 на Pi 4) -> релей -> пульт вторым окном.
 
-    ~/rs-venv/bin/python depth_cam.py --url ws://pizero2w.local:8080/ws/depth
+    ~/rs-venv/bin/python depth_cam.py --url ws://127.0.0.1:8080/ws/depth
 
 Шлёт два вида сообщений:
   * JPEG раскрашенной глубины (ближе — тёплое, дальше — холодное), по кадру в пути, без очереди;
@@ -33,6 +33,83 @@ def wait_camera(timeout=60):
         time.sleep(1)
     print("RealSense не найдена на USB за минуту — выходим, systemd перезапустит"); os._exit(4)
 
+class Imu:
+    """Акселерометр + гироскоп D455 (нужен librealsense с RSUSB: в ядре Pi 4 нет HID-датчиков).
+    Гравитация — акселерометр через ФНЧ (τ≈0.25 с); в покое он меряет реакцию опоры, то есть вектор «вверх»
+    в осях камеры (x вправо, y вниз, z вперёд). Отсюда наклон вверх и крен, а гироскоп вдоль «вверх» — поворот
+    машинки (+ влево) и накопленный курс."""
+    def __init__(self, dev):
+        self.lock = threading.Lock(); self.up = None; self.g = 0.0
+        self.log = None                                   # открытый imu.csv, пока идёт запись 3D (Recorder)
+        self.pend = []; threading.Thread(target=self._flush, daemon=True).start()
+        self.wz = self.wz_prev = 0.0; self.yaw = 0.0; self.t_gyro = None; self.n = 0
+        self.stall = float(os.environ.get("RC_IMU_STALL", "3.0"))  # с без замеров до перезапуска датчика
+        self.holes = 0; self.hole_ms = 0.0                # дыры по часам самого датчика (>50 мс между замерами гироскопа)
+        self.sensor = next((s for s in dev.query_sensors() if s.get_info(rs.camera_info.name) == "Motion Module"), None)
+        if self.sensor is None: print("IMU: Motion Module не виден — нужен pyrealsense2 с RSUSB (~/rs-rsusb)"); return
+        profs = [p for p in self.sensor.get_stream_profiles() if p.stream_type() in (rs.stream.accel, rs.stream.gyro)]
+        pick = {}                                         # самая низкая частота каждого потока (гироскоп 200, акселерометр 63 Гц):
+        for p in profs:                                   # на 400+250 Гц обработчик на Python душит RSUSB, и датчик застывает раз в 5–10 с
+            if p.stream_type() not in pick or p.fps() < pick[p.stream_type()].fps(): pick[p.stream_type()] = p
+        self.profiles = list(pick.values()); self.last = time.time(); self.restarts = 0
+        self.sensor.open(self.profiles); self.sensor.start(self._cb)
+        print("IMU: акселерометр и гироскоп включены:", ", ".join(f"{p.stream_type()} {p.fps()} Гц" for p in self.profiles))
+
+    def _flush(self):
+        while True:
+            time.sleep(0.5)
+            with self.lock: rows, self.pend, log = self.pend, [], self.log
+            if log and rows:
+                try: log.write("".join(f"{t:.3f},{k},{x:.5f},{y:.5f},{z:.5f}\n" for t, k, x, y, z in rows))
+                except ValueError: pass                       # файл закрыли между делом — запись остановлена
+
+    def check(self):
+        """Сторож: на RSUSB датчик движения иногда молча перестаёт слать замеры (25.10 застыл через пару минут) —
+        перезапускаем только его, глубина и запись идут дальше. Порог 3 с: короткие дыры (~1–2 с, пара в минуту) датчик
+        переживает сам, а перезапуск их только множит (замер 25.10: сторож 0.3 с — 31 перезапуск и 11 с дыр в минуту,
+        без сторожа — 2 дыры и 4 с). Курс в дыре досчитывается по скорости поворота до и после неё.
+        """
+        if self.sensor is None or time.time() - self.last < self.stall: return
+        self.restarts += 1; self.last = time.time()
+        if self.restarts % 20 == 1: print(f"IMU: замеров нет {self.stall:.1f} с — перезапуск датчика движения (№{self.restarts})")
+        try: self.sensor.stop()
+        except Exception: pass
+        try: self.sensor.close()
+        except Exception: pass
+        try: self.sensor.open(self.profiles); self.sensor.start(self._cb)
+        except Exception as e: print("IMU: не перезапустился:", e)
+
+    def _cb(self, f):
+        m = f.as_motion_frame(); v = m.get_motion_data(); v = np.array([v.x, v.y, v.z]); t = f.get_timestamp() / 1000
+        self.last = time.time()
+        with self.lock:
+            self.n += 1
+            if self.log:                                  # сырьё для офлайн-SLAM: те же часы, что у кадров (frames.csv)
+                # в файл пишет отдельный поток: запись на SD прямо из колбэка стопорила драйвер и датчик застывал
+                self.pend.append((f.get_timestamp(), 'a' if m.get_profile().stream_type() == rs.stream.accel else 'g', v[0], v[1], v[2]))
+            if m.get_profile().stream_type() == rs.stream.accel:
+                self.up = v if self.up is None else self.up + (v - self.up) * 0.02
+                self.g = float(np.linalg.norm(self.up))
+            elif self.up is not None:
+                u = self.up / max(self.g, 1e-6); self.wz = float(v @ u)
+                if self.t_gyro is not None and t - self.t_gyro > 0.05: self.holes += 1; self.hole_ms += (t - self.t_gyro) * 1000
+                if self.t_gyro is not None and 0 < t - self.t_gyro < 0.1: self.yaw += self.wz * (t - self.t_gyro)
+                elif self.t_gyro is not None and 0 < t - self.t_gyro < 3:      # дыра (датчик застывал): поворачивали с той же скоростью,
+                    self.yaw += (self.wz + self.wz_prev) / 2 * (t - self.t_gyro)  # что до и после неё — среднее лучше, чем ноль
+                self.wz_prev = self.wz
+                self.t_gyro = t
+
+    def state(self):
+        """{pitch°: вверх +, roll°: вправо +, wz °/с: влево +, yaw°, g м/с², up: вектор «вверх» в осях камеры}."""
+        with self.lock:
+            if self.up is None: return None
+            x, y, z = self.up
+            return {"restarts": self.restarts, "holes": self.holes, "hole_ms": round(self.hole_ms), "pitch": round(float(np.degrees(np.arctan2(z, -y))), 1), "roll": round(float(np.degrees(np.arctan2(x, -y))), 1),
+                    "wz": round(float(np.degrees(self.wz)), 1), "yaw": round(float(np.degrees(self.yaw)), 1),
+                    "g": round(self.g, 2), "up": [round(float(c), 3) for c in self.up / max(self.g, 1e-6)]}
+
+IMU = None
+
 def open_camera(a):
     dev = wait_camera()
     if a.reset:                                    # аппаратный сброс: камера после сбоя бывает «полуживой»
@@ -46,6 +123,9 @@ def open_camera(a):
     global DI
     DI = prof.get_stream(rs.stream.depth).as_video_stream_profile().intrinsics
     usb = dev.get_info(rs.camera_info.usb_type_descriptor)
+    global IMU
+    try: IMU = Imu(dev)
+    except Exception as e: print(f"IMU не запустился: {e}")
     print(f"RealSense {dev.get_info(rs.camera_info.name)}, USB {usb}, глубина {a.width}x{a.height}@{a.fps}")
     return pipe, scale, usb
 
@@ -69,7 +149,11 @@ class Recorder:
     def feed(self, fs, scale, want_raw=False):
         """Пишет кадр, если идёт запись; с want_raw ещё и возвращает уменьшенную пару для живой 3D-карты."""
         on = REC_FLAG.exists()
-        if not on and self.dir: print(f"запись остановлена: {self.dir}, {self.n} кадров, пропущено {self.dropped}"); self.dir = None
+        if not on and self.dir:
+            print(f"запись остановлена: {self.dir}, {self.n} кадров, пропущено {self.dropped}"); self.dir = None
+            if IMU and IMU.log:
+                with IMU.lock: log, IMU.log, IMU.pend = IMU.log, None, []
+                time.sleep(0.6); log.close()                  # дать потоку записи дописать хвост
         if not on and not want_raw: return None
         al = self.align.process(fs)
         d, c = al.get_depth_frame(), al.get_color_frame()
@@ -82,6 +166,9 @@ class Recorder:
             (self.dir / "intrinsics.json").write_text(json.dumps({"width": i.width, "height": i.height, "fx": i.fx, "fy": i.fy,
                                                                   "cx": i.ppx, "cy": i.ppy, "depth_scale": scale}))
             self.n = self.dropped = 0; self.t0 = time.time(); print(f"запись: {self.dir}")
+            if IMU and IMU.sensor is not None:          # акселерометр (a, м/с²) и гироскоп (g, рад/с) в осях камеры
+                with IMU.lock:
+                    IMU.log = open(self.dir / "imu.csv", "w", buffering=1 << 16); IMU.log.write("t_ms,kind,x,y,z\n")
         try:
             self.q.put_nowait((self.dir, self.n, c.get_timestamp(), np.asanyarray(d.get_data()).copy(), np.asanyarray(c.get_data()).copy()))
             self.n += 1
@@ -95,7 +182,8 @@ class Recorder:
         rgb = Image.fromarray(np.asanyarray(c.get_data())).reduce(2)
         i = c.profile.as_video_stream_profile().intrinsics
         meta = json.dumps({"w": z.shape[1], "h": z.shape[0], "fx": i.fx / 2, "fy": i.fy / 2, "cx": i.ppx / 2, "cy": i.ppy / 2,
-                           "depth_scale": scale, "t": time.time(), "rec": rec_name}).encode()
+                           "depth_scale": scale, "t": time.time(), "rec": rec_name,
+                           "imu": IMU.state() if IMU else None}).encode()
         bz = io.BytesIO(); Image.fromarray(z).save(bz, "PNG", compress_level=1)
         bc = io.BytesIO(); rgb.save(bc, "JPEG", quality=80)
         bz = bz.getvalue()
@@ -116,10 +204,12 @@ def profile(z, a):
     Ещё доля «дыр» (нет глубины) внизу по центру: D455 ближе ~0.4 м не видит, и большая дыра там —
     признак, что препятствие уже совсем рядом."""
     global PROF
-    if PROF is None:                                   # лучи пикселей считаем один раз (каждый 4-й пиксель)
+    im = IMU.state() if IMU else None
+    pitch = im["pitch"] if im and 8 < im["g"] < 11.5 else a.pitch   # наклон из IMU, если не трясёт (|g| около 9.8)
+    if PROF is None or abs(PROF["pitch"] - pitch) > 1:  # лучи пикселей пересчитываем, только когда наклон сменился
         v, u = np.mgrid[0:z.shape[0]:4, 0:z.shape[1]:4]
-        th = np.radians(a.pitch)
-        PROF = {"rx": (u - DI.ppx) / DI.fx, "ry": (v - DI.ppy) / DI.fy, "s": np.sin(th), "c": np.cos(th)}
+        th = np.radians(pitch)
+        PROF = {"rx": (u - DI.ppx) / DI.fx, "ry": (v - DI.ppy) / DI.fy, "s": np.sin(th), "c": np.cos(th), "pitch": pitch}
     P = PROF; zz = z[::4, ::4]
     Y = P["ry"] * zz
     h = a.cam_height - Y * P["c"] + zz * P["s"]        # высота над полом
@@ -138,23 +228,32 @@ def profile(z, a):
 rec = None
 raw_viewers, raw_at = set(), 0.0                   # live_slam.py: уменьшенная RGBD-пара несколько раз в секунду
 
+DEPTH_N = {"n": None, "t": time.time()}
+
 def grab(pipe, scale, a, filt):
     global raw_at
+    if IMU: IMU.check()
     fs = pipe.wait_for_frames(2000)
     want = bool(raw_viewers) and time.time() - raw_at >= 1 / a.raw_fps
     rawmsg = rec.feed(fs, scale, want) if rec else None
     if rawmsg: raw_at = time.time()
     d = fs.get_depth_frame()
+    # на RSUSB глубина иногда замирает, а цвет идёт дальше: pipeline отдаёт тот же кадр глубины снова и снова
+    # (25.10 автопилот 30 с «видел» стену из старого кадра). Повтор — помечаем несвежим; дольше 1 с — перезапуск камеры
+    dn = d.get_frame_number(); fresh = dn != DEPTH_N["n"]
+    if fresh: DEPTH_N.update(n=dn, t=time.time())
+    elif time.time() - DEPTH_N["t"] > 1.0: raise RuntimeError(f"глубина застыла на кадре {dn} (цвет идёт)")
     for f in filt: d = f.process(d)
     z = np.asanyarray(d.get_data()).astype(np.float32) * scale
     h, w = z.shape
     c = z[h // 2 - 4:h // 2 + 4, w // 2 - 4:w // 2 + 4]; c = c[c > 0]
     band = z[int(h * .30):int(h * .75), w // 3:2 * w // 3]; band = band[(band > a.near) & (band < a.far)]
-    stats = {"type": "depth", "online": True,
+    stats = {"type": "depth", "online": True, "fresh": fresh, "dn": dn,
              "center": round(float(np.median(c)), 2) if c.size else None,
              "ahead": round(float(np.percentile(band, 3)), 2) if band.size > 50 else None,   # 3-й перцентиль: шум не считаем препятствием
              "valid": round(float((z > 0).mean()), 2), "w": w, "h": h,
              **dict(zip(("prof", "hole_lo"), profile(z, a))),
+             "imu": IMU.state() if IMU else None,
              **({"rec": rec.n, "rec_drop": rec.dropped, "rec_s": round(time.time() - rec.t0, 1)} if rec and rec.dir else {})}
     buf = io.BytesIO(); Image.fromarray(colorize(z, a.near, a.far)).save(buf, "JPEG", quality=a.quality)
     return buf.getvalue(), stats, rawmsg
@@ -245,7 +344,7 @@ async def main(a):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--url", default="ws://pizero2w.local:8080/ws/depth")
+    p.add_argument("--url", default="ws://127.0.0.1:8080/ws/depth")
     p.add_argument("--width", type=int, default=640)
     p.add_argument("--height", type=int, default=480)
     p.add_argument("--fps", type=int, default=15)
@@ -258,7 +357,7 @@ if __name__ == "__main__":
     p.add_argument("--color", action="store_true", help="включить цветную камеру и запись для SLAM по флагу ~/rc/rec.on")
     p.add_argument("--view-fps", type=float, default=8, help="к/с картинки глубины пультам (цифры — каждый кадр)")
     p.add_argument("--raw-fps", type=float, default=4, help="к/с уменьшенных RGBD-пар для живой 3D-карты (live_slam.py)")
-    p.add_argument("--pitch", type=float, default=25, help="°, камера смотрит вверх (для профиля препятствий)")
+    p.add_argument("--pitch", type=float, default=0, help="°, камера смотрит вверх (для профиля препятствий), если IMU нет; камера смотрит прямо вперёд")
     p.add_argument("--cam-height", type=float, default=0.10, help="м, высота камеры над полом")
     p.add_argument("--body-min", type=float, default=0.04, help="м, ниже — пол")
     p.add_argument("--body-max", type=float, default=0.35, help="м, выше — машинка проедет под")

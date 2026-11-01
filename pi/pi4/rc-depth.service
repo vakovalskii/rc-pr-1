@@ -1,14 +1,18 @@
 [Unit]
-Description=RC-багги: RealSense D455 -> релей на Pi Zero (окно глубины в пульте)
+Description=RC-багги: RealSense D455 -> релей на этой же Pi 4 (окно глубины в пульте)
 After=network-online.target
 Wants=network-online.target
 # перезапускать без ограничения: камера может пропадать с USB надолго
 StartLimitIntervalSec=0
 
 [Service]
+# librealsense, собранный с RSUSB (~/librealsense/build2 → ~/rs-rsusb): IMU D455 читается по libusb —
+# в ядре Pi 4 нет HID-датчиков, с колёсным pyrealsense2 Motion Module не виден.
+Environment=PYTHONPATH=/home/pi/rs-rsusb
+Environment=LD_LIBRARY_PATH=/home/pi/rs-rsusb
 User=pi
 WorkingDirectory=/home/pi/rc
-ExecStart=/home/pi/rs-venv/bin/python -u /home/pi/rc/depth_cam.py --reset --watchdog 5 --serve 8090 --color --raw-fps 5 --view-fps 8 --url ws://pizero2w.local:8080/ws/depth
+ExecStart=/home/pi/rs-venv/bin/python -u /home/pi/rc/depth_cam.py --watchdog 5 --serve 8090 --color --raw-fps 5 --view-fps 15 --url ws://127.0.0.1:8080/ws/depth
 Restart=always
 RestartSec=3
 TimeoutStopSec=5

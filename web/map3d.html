@@ -295,6 +295,15 @@ function onPose(m){
   }
 }
 
+function onPath(p){                        // путь целиком (после обрыва или с середины поездки): камера → three
+  for (let i = 0; i + 2 < p.length && pathN < MAXP; i += 3) {
+    const q = new THREE.Vector3(p[i], -p[i + 1], -p[i + 2]);
+    if (last) pathLen += last.distanceTo(q);
+    pathBuf.set([q.x, q.y, q.z], pathN * 3); pathN++; last = q;
+  }
+  pathGeo.setDrawRange(0, pathN); pathGeo.attributes.position.needsUpdate = true; $('#path').textContent = pathLen.toFixed(1);
+}
+
 let followOn = true, topOn = false;
 function setFollow(v){ followOn = v; $('#follow').classList.toggle('on', v); }
 function setTop(v){
@@ -306,16 +315,17 @@ $('#follow').onclick = () => setFollow(!followOn);
 $('#top').onclick = () => setTop(!topOn);
 addEventListener('keydown', e => { if (e.code === 'KeyF') setFollow(!followOn); if (e.code === 'KeyT') setTop(!topOn); });
 
-let ws;
+let ws, gen = -1, have = 0;                 // что уже есть: при переподключении релей дошлёт только остальное
 function connect(){
-  ws = new WebSocket(`ws://${location.host}/ws/map3dview`); ws.binaryType = 'arraybuffer';
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/map3dview?gen=${gen}&have=${have}`); ws.binaryType = 'arraybuffer';
   ws.onopen = () => { $('#dot').classList.add('on'); $('#link').textContent = 'на связи'; };
   ws.onclose = () => { $('#dot').classList.remove('on'); $('#link').textContent = 'нет связи'; setTimeout(connect, 1000); };
   ws.onmessage = e => {
-    if (typeof e.data !== 'string') { (new Uint8Array(e.data, 0, 1)[0] === 71 ? onGrid : addChunk)(e.data); return; }   // 71 = 'G'
+    if (typeof e.data !== 'string') { if (new Uint8Array(e.data, 0, 1)[0] === 71) onGrid(e.data); else { addChunk(e.data); have++; } return; }   // 71 = 'G'
 
     const m = JSON.parse(e.data);
-    if (m.type === 'reset') { clear(); $('#empty').style.display = ''; $('#emptyTxt').textContent = m.rec ? 'Новая запись. Жду первые точки…' : 'Жду первые точки…'; }
+    if (m.type === 'reset') { clear(); if (m.gen !== undefined) { gen = m.gen; have = 0; } $('#empty').style.display = ''; $('#emptyTxt').textContent = m.rec ? 'Новая запись. Жду первые точки…' : 'Жду первые точки…'; }
+    if (m.type === 'path') onPath(m.p);
     if (m.type === 'pose') onPose(m);
     if (m.type === 'plan') onPlan(m);
   };

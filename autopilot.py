@@ -28,8 +28,9 @@ from live_slam import Live, decode
 
 ROOT = pathlib.Path(__file__).parent
 OUT = ROOT / "data" / "explore"
-DEF = {"stop_m": 0.45, "coast_m": 0.15, "half_w": 0.16, "robot_r": 0.18, "steer_max_deg": 25, "wheelbase": 0.26,
-       "reverse_s": 1.3, "lookahead": 0.4, "ring_m": 0.45}
+# корпус 39 см, камера на переднем бампере смотрит вперёд: центр машинки — cam_back позади камеры, robot_r — пол-длины
+DEF = {"stop_m": 0.45, "coast_m": 0.15, "half_w": 0.16, "robot_r": 0.21, "cam_back": 0.20, "steer_max_deg": 25, "wheelbase": 0.26,
+       "reverse_s": 1.3, "lookahead": 0.4, "ring_m": 0.45, "pulse_on": 0.4, "pulse_off": 0.4}
 
 class Memory:
     """Сетка препятствий из профиля глубины, те же клетки, что у сетки SLAM (5 см, центр в n/2)."""
@@ -182,11 +183,12 @@ class Planner:
 class Autopilot:
     def __init__(self, a, P):
         self.a, self.P = a, P
-        self.live = Live(argparse.Namespace(voxel=0.04, depth_max=2.5, key_m=0.08, key_deg=8, pitch=25, cam_height=0.10,
+        self.live = Live(argparse.Namespace(voxel=0.04, depth_max=2.5, key_m=0.08, key_deg=8, pitch=0, cam_height=0.10,
                                             z_min=0.04, z_max=0.35, car_radius=0.15, res=0.05, grid_m=30, max_points=1_500_000,
                                             planar=True, scan=True),
                          freeze_up=True)
-        self.mem = Memory(); self.pose = None; self.pose_t = 0; self.pose_hist = []; self.home = None
+        self.mem = Memory(); self.pose = None; self.cam = None   # pose — центр корпуса (по нему планируем), cam — камера (от неё глубина)
+        self.pose_t = 0; self.pose_hist = []; self.home = None
         self.stats = None; self.stats_t = 0; self.tele = {}
         self.mode = "idle"; self.state = "жду"; self.state_t = time.time()
         self.path, self.target, self.goal, self.ring, self.ring_i, self.frontiers = [], None, None, [], 0, 0
@@ -372,7 +374,7 @@ async def main(a):
     OUT.mkdir(parents=True, exist_ok=True)
     pf = OUT / "params.json"; P = {**DEF, **(json.loads(pf.read_text()) if pf.exists() else {})}
     print("параметры:", P)
-    ap = Autopilot(a, P); loop = asyncio.get_running_loop(); ap.loop = loop
+    ap = Autopilot(a, P); loop = asyncio.get_running_loop(); ap.loop = loop; resume = None
     async with aiohttp.ClientSession(trust_env=False) as s:
         while True:
             try:
@@ -388,9 +390,9 @@ async def main(a):
                     async for m in cam:
                         if m.type == aiohttp.WSMsgType.TEXT:
                             j = json.loads(m.data)
-                            if j.get("type") == "depth" and "prof" in j:
+                            if j.get("type") == "depth" and "prof" in j and j.get("fresh", True):   # повтор старого кадра глубины — не верим
                                 ap.stats, ap.stats_t = j, time.time()
-                                if ap.pose: ap.mem.add(*ap.pose, j["prof"])
+                                if ap.cam: ap.mem.add(*ap.cam, j["prof"])          # лучи глубины — от камеры, не от центра
                         elif m.type == aiohttp.WSMsgType.BINARY and m.data[:4] == b"RGBD": latest["b"] = m.data; ev.set()
 
                 async def rx_pult():
@@ -415,7 +417,8 @@ async def main(a):
                         await ev.wait(); ev.clear()
                         meta, zpng, cjpg = decode(latest["b"])
                         chunk, grid, pose = await loop.run_in_executor(None, ap.live.process, meta, zpng, cjpg)
-                        T = np.array(pose["T"]).reshape(4, 4); x, y, yaw = ap.pose2d(T)
+                        T = np.array(pose["T"]).reshape(4, 4); cx, cy, yaw = ap.pose2d(T); ap.cam = (cx, cy, yaw)
+                        b = ap.P["cam_back"]; x, y = cx - b * math.cos(yaw), cy - b * math.sin(yaw)
                         if ap.pose: ap.dist_total += math.hypot(x - ap.pose[0], y - ap.pose[1])
                         ap.pose, ap.pose_t = (x, y, yaw), time.time(); ap.pose_hist = (ap.pose_hist + [(time.time(), x, y)])[-100:]
                         ap.mem.mark_visited(x, y)
@@ -425,6 +428,9 @@ async def main(a):
                         await out.send_str(json.dumps(pose))
 
                 tasks = [asyncio.create_task(c()) for c in (rx_cam, rx_pult, rx_cmd, slam)]
+                if resume and ap.mode == "idle" and ap.home:          # связь вернулась — продолжаем то, что делали
+                    print("продолжаю:", resume); ap.set_mode(resume, ap.home[:2] if resume == "home" else None)
+                resume = None
                 if a.start and ap.mode == "idle": ap.set_mode(a.start, ap.home[:2] if a.start == "home" and ap.home else None); a.start = None
                 i, driving, coast_from, plan_sent, decay_t = 0, False, None, 0, time.time()
                 while not any(t.done() for t in tasks):
@@ -445,6 +451,9 @@ async def main(a):
                         if ap.ep: ap.ep["coast"].append(round(math.hypot(ap.pose[0] - coast_from[0][0], ap.pose[1] - coast_from[0][1]), 3))
                         coast_from = None
                     if why != ap.state: ap.state, ap.state_t = why, now
+                    # рывками: SLAM на Pi 4 — ~3 кадра/с, на ходу поза отстаёт и срывается. Вперёд — pulse_on с газом,
+                    # pulse_off на месте (руль держим), за паузу SLAM догоняет. Назад не трогаем: у регулятора там тормоз
+                    if thr > 0 and (now % (P["pulse_on"] + P["pulse_off"])) > P["pulse_on"]: thr = 0.0
                     active = ap.mode != "idle" or ap.man is not None
                     # человек взял управление: машинка делает не то, что мы шлём
                     # (сравниваем, только когда наша команда 0.5 с не менялась: телеметрия запаздывает, а двойное
@@ -473,12 +482,13 @@ async def main(a):
                 raise ConnectionError("связь оборвалась")
             except Exception as e:
                 print(f"нет связи ({e.__class__.__name__}: {e}) — повтор через 2 с"); ap.man = None
+                if ap.mode in ("explore", "lap", "home"): resume = ap.mode     # камера глубины перезапустилась — не бросаем дело
                 if ap.mode != "idle": ap.set_mode("idle")
                 await asyncio.sleep(2)
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--start", choices=["explore", "lap", "home"], help="сразу начать")
-    p.add_argument("--relay", default="http://pizero2w.local:8080")
+    p.add_argument("--relay", default="http://raspberrypi.local:8080")
     p.add_argument("--pi4", default="http://raspberrypi.local:8090/")
     asyncio.run(main(p.parse_args()))

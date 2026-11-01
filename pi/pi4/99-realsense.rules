@@ -1,0 +1,5 @@
+# Intel RealSense (D455): доступ без root к камере и к HID-интерфейсу IMU (акселерометр + гироскоп).
+# Без этого /dev/hidraw* только для root, и rc-depth от pi не видит Motion Module.
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="8086", MODE:="0666", GROUP:="plugdev"
+KERNEL=="hidraw*", ATTRS{idVendor}=="8086", MODE:="0666", GROUP:="plugdev"
+KERNEL=="iio*", ATTRS{idVendor}=="8086", MODE:="0666", GROUP:="plugdev"

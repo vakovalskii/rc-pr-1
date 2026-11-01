@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0f12">
+<title>RC Buggy — вход</title>
+<style>
+  :root{
+    --bg:#0d0f12; --panel:#15181d; --line:#2a2f38;
+    --fg:#eceae6; --dim:#9a9890; --amber:#ffad33; --amber-ink:#1a1206; --bad:#ff6257;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html{-webkit-text-size-adjust:100%}
+  html,body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 var(--sans)}
+  body{min-height:100vh;min-height:100dvh;display:grid;place-items:center;
+       padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+  form{width:min(340px,100%);display:grid;gap:14px}
+  h1{margin:0 0 6px;font:600 13px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+  label{font-size:14px;color:var(--dim)}
+  input{width:100%;font:18px var(--mono);color:var(--fg);background:var(--panel);border:1px solid var(--line);
+        border-radius:10px;padding:14px 14px;outline:none}
+  input:focus{border-color:var(--amber)}
+  button{font:600 16px var(--sans);color:var(--amber-ink);background:var(--amber);border:0;border-radius:10px;
+         padding:14px;min-height:48px;cursor:pointer;touch-action:manipulation}
+  button:active{transform:translateY(1px)}
+  .err{margin:0;color:var(--bad);font-size:14px}
+  .err:empty{display:none}
+</style>
+</head>
+<body>
+<form method="post" action="/login">
+  <h1>RC Buggy · пульт</h1>
+  <label for="p">Пароль</label>
+  <input id="p" name="password" type="password" autocomplete="current-password" autofocus required>
+  <p class="err">__ERR__</p>
+  <button type="submit">Войти</button>
+</form>
+</body>
+</html>

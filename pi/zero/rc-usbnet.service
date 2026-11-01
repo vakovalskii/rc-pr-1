@@ -1,0 +1,12 @@
+[Unit]
+Description=RC-багги: сеть по USB-кабелю к Pi 4 (Zero = 10.55.0.2)
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/home/pi/rc/usb_net.sh
+
+[Install]
+WantedBy=multi-user.target

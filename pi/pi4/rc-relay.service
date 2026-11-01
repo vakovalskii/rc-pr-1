@@ -1,0 +1,14 @@
+[Unit]
+Description=RC-багги: релей и веб-пульт на :8080 (центральный хаб на Pi 4)
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/rc
+ExecStart=/home/pi/rs-venv/bin/python -u relay.py --port 8080 --map /home/pi/rc/map --pass-file /home/pi/rc/.pult_pass
+Restart=always
+RestartSec=2
+TimeoutStopSec=3
+
+[Install]
+WantedBy=multi-user.target

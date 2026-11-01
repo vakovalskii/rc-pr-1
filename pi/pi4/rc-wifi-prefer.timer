@@ -1,0 +1,9 @@
+[Unit]
+Description=RC-багги: раз в 30 с проверять, не пора ли на Wi-Fi модема
+
+[Timer]
+OnBootSec=40
+OnUnitActiveSec=30
+
+[Install]
+WantedBy=timers.target

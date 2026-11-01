@@ -1,0 +1,6 @@
+[Unit]
+Description=RC-багги: перейти на Wi-Fi модема (NZT2), если он виден
+
+[Service]
+Type=oneshot
+ExecStart=/home/pi/rc/wifi_prefer.sh

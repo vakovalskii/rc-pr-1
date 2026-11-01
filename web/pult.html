@@ -40,7 +40,7 @@
   body.split #osdCross{left:25%} @media (orientation:portrait){ body.split #osdCross{left:50%;top:25%} }
   #dInfo{position:absolute;left:0;right:0;top:calc(env(safe-area-inset-top) + 58px);text-align:center;pointer-events:none;
     font:600 14px/1.3 var(--mono);color:#f4f2ec;text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 4px #000}
-  #paneCtl{position:absolute;left:14px;top:calc(env(safe-area-inset-top) + 150px);z-index:7;display:flex;gap:8px;flex-wrap:wrap}
+  #paneCtl{position:absolute;left:14px;top:calc(env(safe-area-inset-top) + 194px);z-index:7;display:flex;gap:8px;flex-wrap:wrap}
   #recBtn{font:600 13px/1 system-ui,-apple-system,sans-serif;
     color:#f3efe6;background:#15181dd9;border:1px solid #3a3f47;border-radius:8px;padding:10px 12px;cursor:pointer;touch-action:manipulation}
   #recBtn:disabled{opacity:.4;cursor:default}
@@ -48,6 +48,12 @@
   #recBtn .rd{color:#ef4444} #recBtn.on .rd{color:#fff;animation:blink 1s steps(2) infinite}
   #dInfo .lbl{color:#cfcabd;font-size:11px;font-weight:700;letter-spacing:.08em}
   #dAhead{font-size:30px;display:block}
+  #dImu{display:block;margin-top:4px;font-size:12px;color:#e6e2d8}
+  #dImu:empty{display:none}
+  #dHor{display:inline-block;vertical-align:middle;width:22px;height:22px;margin-right:6px;border:1.5px solid #e6e2d8;border-radius:50%;
+    position:relative;overflow:hidden;box-shadow:0 0 3px #000}
+  #dHor i{position:absolute;left:-4px;right:-4px;top:50%;height:2px;margin-top:-1px;background:var(--amber);transition:transform .15s var(--ease)}
+  @media (prefers-reduced-motion:reduce){#dHor i{transition:none}}
   #dAhead.near{color:var(--bad)} #dAhead.mid{color:var(--warn)}
   #dBox{position:absolute;left:33.3%;width:33.3%;top:30%;height:45%;border:2px dashed #ffffff8c;pointer-events:none}
   #dOff{position:absolute;inset:0;display:grid;place-items:center;color:var(--faint);font-size:14px}
@@ -137,7 +143,8 @@
   #scrim{position:fixed;inset:0;z-index:25;background:#0008;opacity:0;pointer-events:none;transition:opacity .2s var(--ease)}
   #scrim.on{opacity:1;pointer-events:auto}
 
-  #mini{position:fixed;z-index:6;right:calc(env(safe-area-inset-right) + 12px);top:calc(env(safe-area-inset-top) + 58px);
+  #mini{position:fixed;z-index:6;right:calc(env(safe-area-inset-right) + 12px);top:calc(env(safe-area-inset-top) + 250px);   /* под блоком «Zero / ESP» */
+    
     width:150px;height:150px;border:1px solid var(--line);border-radius:8px;background:#15181dd9;display:none;pointer-events:none}
   .hit{animation:hit .4s} @keyframes hit{from{background:#7f1d1d}to{background:#15181dd9}}
 
@@ -148,6 +155,13 @@
   #osd .blk{position:absolute;display:flex;flex-direction:column;gap:2px}
   #osd .lbl{color:#cfcabd;font-size:11px;font-weight:700;letter-spacing:.08em}
   #osd .big{font-size:20px}
+  .grp{font:700 10px/1.2 var(--mono);letter-spacing:.12em;color:var(--amber);margin-top:8px}
+  .grp:first-child{margin-top:0}
+  #dInfo .grp{display:block;margin:0 0 2px}
+  @media (orientation:landscape){
+    body.split #osdTR{right:calc(50% + 14px);top:calc(env(safe-area-inset-top) + 128px)}   /* правый край окна видео, под кнопками газа/руля */
+    body.split #mini{display:none!important}
+  }
   #osdTL{left:calc(env(safe-area-inset-left) + 18px);top:calc(env(safe-area-inset-top) + 62px)}
   #osdTR{right:calc(env(safe-area-inset-right) + 18px);top:calc(env(safe-area-inset-top) + 62px);align-items:flex-end}
   #osdCross{position:absolute;left:50%;top:50%;width:28px;height:28px;margin:-14px 0 0 -14px;opacity:.75}
@@ -169,7 +183,8 @@
   .bars{display:inline-flex;gap:2px;align-items:flex-end;height:14px;margin-left:6px;vertical-align:-1px}
   .bars span{width:4px;background:#f4f2ec;box-shadow:0 0 0 1px #000;opacity:.25}
   .bars span.on{opacity:1}
-  @media (max-height:460px){ #osdTL,#osdTR{top:calc(env(safe-area-inset-top) + 56px)} #osd{font-size:12px} #osd .big{font-size:16px}
+  @media (max-height:460px){ #mini{display:none!important}   /* на телефоне места нет — карта во вкладке «3D» */
+    #osdTL,#osdTR{top:calc(env(safe-area-inset-top) + 56px)} #osd{font-size:12px} #osd .big{font-size:16px}
     #osdThr,#osdThrV{display:none} }
   body.osd .wide,body.osd #wifiPill{display:none!important}
   #osdQuick{position:absolute;left:50%;top:calc(env(safe-area-inset-top) + 60px);transform:translateX(-50%);display:flex;gap:18px;pointer-events:auto;z-index:7}
@@ -222,7 +237,7 @@
   <iframe id="map3dFrame" title="живая 3D-карта"></iframe>
   <div id="paneCtl"><div id="paneTabs"><button id="tabDepth" class="on">глубина</button><button id="tabMap"><span class="lg">3D-карта</span><span class="sm">3D</span></button></div>
   <button id="recBtn" disabled title="запись глубины и цвета для 3D-карты (SLAM)"><span class="rd">●</span> <span id="recTxt">запись 3D</span></button></div>
-  <div id="dInfo"><span class="lbl">ВПЕРЕДИ</span><span id="dAhead">—</span><span id="dMeta"></span></div>
+  <div id="dInfo"><span class="grp">D455 · ГЛУБИНА + IMU</span><span class="lbl">ВПЕРЕДИ</span><span id="dAhead">—</span><span id="dMeta"></span><span id="dImu"></span></div>
   <div id="dOff">камера глубины не на связи</div></div>
 
 <div id="top">
@@ -245,17 +260,22 @@
 
 <div id="osd">
   <div class="blk" id="osdTL">
+    <span class="grp">СВЯЗЬ</span>
     <span><span class="lbl">ВРЕМЯ </span><span class="big" id="oTime">00:00</span></span>
-    <span><span class="lbl">ОТКЛИК </span><span id="oRtt">—</span></span>
-    <span><span class="lbl">ВИДЕО </span><span id="oFps">—</span></span>
+    <span title="команда с пульта → ответ машинки"><span class="lbl">ОТКЛИК </span><span id="oRtt">—</span></span>
+    <span title="кадры с камеры Zero: частота · задержка"><span class="lbl">ВИДЕО </span><span id="oFps">—</span></span>
+    <span class="grp" id="o4gHead" style="display:none">4G · МОДЕМ</span>
+    <span id="o4gRow" style="display:none"><span class="lbl">СИГНАЛ </span><span id="o4g">—</span><span class="bars" id="o4gBars"><span style="height:4px"></span><span style="height:7px"></span><span style="height:10px"></span><span style="height:14px"></span></span></span>
   </div>
   <div class="blk" id="osdTR">
-    <span><span class="lbl">WI-FI </span><span id="oWifi">—</span><span class="bars" id="oBars"><span style="height:4px"></span><span style="height:7px"></span><span style="height:10px"></span><span style="height:14px"></span></span></span>
-    <span><span class="lbl">ТЕМП Pi </span><span id="oTemp">—</span></span>
+    <span class="grp">ZERO · БОРТ</span>
+    <span title="Wi-Fi платы Zero"><span class="lbl">WI-FI </span><span id="oWifi">—</span><span class="bars" id="oBars"><span style="height:4px"></span><span style="height:7px"></span><span style="height:10px"></span><span style="height:14px"></span></span></span>
+    <span><span class="lbl">ТЕМП </span><span id="oTemp">—</span></span>
     <span><span class="lbl">НАГРУЗКА </span><span id="oCpu">—</span></span>
-    <span><span class="lbl">ESC </span><span id="oEsc">—</span></span>
-    <span id="oPotRow"><span class="lbl">РУЛЬ ДАТЧ </span><span id="oPot">—</span></span>
     <span id="oVolt" style="color:var(--bad);display:none">ПИТАНИЕ ПРОСЕЛО</span>
+    <span class="grp">ESP · ХОД И РУЛЬ</span>
+    <span title="сигнал на регулятор хода, 1500 — нейтраль"><span class="lbl">ESC </span><span id="oEsc">—</span></span>
+    <span id="oPotRow" title="потенциометр сервы руля"><span class="lbl">ДАТЧИК РУЛЯ </span><span id="oPot">—</span></span>
   </div>
   <div id="osdQuick">
     <div class="q"><button data-q="thr" data-d="-10" aria-label="меньше газа">−</button>
@@ -346,7 +366,9 @@
   <h3>Руль</h3><dl class="tele" id="tSteer"></dl>
   <h3>Ход</h3><dl class="tele" id="tDrive"></dl>
   <h3>Связь</h3><dl class="tele" id="tLink"></dl>
+  <h3>4G модема</h3><dl class="tele" id="t4g"><dt>данных нет</dt><dd>—</dd></dl>
   <h3>Борт</h3><dl class="tele" id="tPi"></dl>
+  <h3>IMU камеры</h3><dl class="tele" id="tImu"><dt>данных нет</dt><dd>—</dd></dl>
 </aside>
 
 <script>
@@ -364,7 +386,7 @@ const expo = (x, e) => (1 - e) * x + e * x * x * x;   // RC-экспонента
 
 // ---------- связь ----------
 function connect(){
-  ws = new WebSocket(`ws://${location.host}/ws/pult`);
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/pult`);
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => { $('#dot').classList.add('on'); $('#link').textContent = 'на связи'; };
   ws.onclose = () => { $('#dot').classList.remove('on'); $('#link').textContent = 'нет связи';
@@ -381,6 +403,7 @@ function connect(){
       return;
     }
     const m = JSON.parse(e.data);
+    if (m.type === 'modem') { modemShow(m); return; }
     if (m.type === 'pilot') { $('#apPill').style.display = m.online ? 'flex' : 'none'; return; }
     if (m.type !== 'tele') return;
     const t0 = pending.get(m.ack);
@@ -434,7 +457,11 @@ setInterval(() => {
 function bindPad(el, axis, set){
   const knob = el.querySelector('.knob'); let id = null, o = 0;
   const R = 84;
-  el.addEventListener('pointerdown', e => { id = e.pointerId; o = axis === 'y' ? e.clientY : e.clientX; el.setPointerCapture(id); });
+  el.addEventListener('pointerdown', e => {
+    // окно глубины — свой слой (fixed) под зоной стиков: его кнопки сами клик не получат. Нажали на кнопку — жмём её, стик не берём
+    const b = document.elementsFromPoint(e.clientX, e.clientY).map(x => x.closest && x.closest('#paneCtl button')).find(Boolean);
+    if (b) { b.click(); return; }
+    id = e.pointerId; o = axis === 'y' ? e.clientY : e.clientX; el.setPointerCapture(id); });
   el.addEventListener('pointermove', e => {
     if (e.pointerId !== id) return;
     const d = axis === 'y' ? -(e.clientY - o) : (e.clientX - o);
@@ -568,7 +595,7 @@ $('#depthBtn').addEventListener('click', () => setSplit(!splitOn));
 addEventListener('keydown', e => { if (e.code === 'KeyG' && e.target.tagName !== 'INPUT') setSplit(!splitOn); });
 let dws, dDirect = null, dSrc = null, dBusy = false, dLast = 0, dSeen = false;
 function depthConnect(){
-  dws = new WebSocket(`ws://${location.host}/ws/depthview`); dws.binaryType = 'arraybuffer';
+  dws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/depthview`); dws.binaryType = 'arraybuffer';
   dws.onclose = () => setTimeout(depthConnect, 1500);
   dws.onmessage = depthMsg;
 }
@@ -595,14 +622,43 @@ function depthMsg(e){
     img.src = url; return;
   }
   const m = JSON.parse(e.data);
-  if (m.type === 'depthsrc') { if (m.url !== dSrc) { dSrc = m.url; if (dDirect) dDirect.close(); else depthDirect(); } return; }
+  if (m.type === 'depthsrc') {
+    // камера на том же хосте, что релей: берём кадры через релей (/ws/depthdirect) — так работает и через туннель по https
+    if (/\/\/(127\.0\.0\.1|localhost):/.test(m.url)) m.url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/depthdirect`;
+    if (m.url !== dSrc) { dSrc = m.url; if (dDirect) dDirect.close(); else depthDirect(); } return; }
   if (m.type !== 'depth') return;
   if (m.online === false) { $('#dOff').style.display = ''; return; }
+  $('#dOff').style.display = 'none'; dLast = performance.now();   // цифры идут — камера на связи
   const a = m.ahead, el = $('#dAhead');
   el.textContent = a == null ? 'свободно' : a.toFixed(2) + ' м';
   el.className = a == null ? '' : a < 0.5 ? 'near' : a < 1.0 ? 'mid' : '';
   $('#dMeta').textContent = `центр ${m.center == null ? '—' : m.center.toFixed(2) + ' м'} · ${m.fps} к/с · USB ${m.usb}${dDirect && dDirect.readyState === 1 ? ' · напрямую' : ''}`;
+  imuShow(m.imu);
   recState(m);
+}
+// 4G модема: RSRP — мощность сигнала вышки (дБм), SNR — сигнал/шум (дБ). Пороги — обычные для LTE.
+function modemShow(m){
+  $('#o4gRow').style.display = $('#o4gHead').style.display = m.net ? '' : 'none';
+  if (!m.net) { dl('#t4g', [['модем', 'не отвечает (Pi 4 не в его сети?)']]); return; }
+  const r = m.rsrp, q = r == null ? 0 : r > -85 ? 4 : r > -95 ? 3 : r > -105 ? 2 : 1;
+  const word = ['—', 'слабый', 'средний', 'хороший', 'отличный'][q];
+  const cls = q >= 3 ? 'good' : q === 2 ? '' : 'badc';
+  $('#o4g').textContent = r == null ? m.net : r + ' дБм';
+  $('#o4g').style.color = q <= 1 ? 'var(--bad)' : q === 2 ? 'var(--warn)' : '';
+  $$('#o4gBars span').forEach((b, i) => b.classList.toggle('on', i < q));
+  dl('#t4g', [['оператор', `${m.op || '—'} · ${m.net}`], ['связь', m.online ? '<span class="good">в сети</span>' : '<span class="badc">нет интернета</span>'],
+              ['сигнал (RSRP)', r == null ? '—' : `<span class="${cls}">${r} дБм · ${word}</span>`],
+              ['сигнал/шум (SNR)', m.snr == null ? '—' : `${m.snr} дБ` + (m.snr < 0 ? ' · <span class="badc">помехи</span>' : '')],
+              ['качество (RSRQ)', m.rsrq == null ? '—' : m.rsrq + ' дБ'], ['полоски модема', m.bars == null ? '—' : m.bars + ' из 5']]);
+}
+// IMU D455: наклон камеры вверх (+), крен вправо (+), поворот машинки влево (+), курс с включения — дрейфует
+function imuShow(im){
+  if (!im) { $('#dImu').innerHTML = ''; return; }
+  const f = (v, d = 1) => (v > 0 ? '+' : '') + v.toFixed(d) + '°';
+  $('#dImu').innerHTML = `<span id="dHor"><i style="transform:rotate(${-im.roll}deg) translateY(${Math.max(-9, Math.min(9, im.pitch / 4))}px)"></i></span>`
+    + `IMU: наклон ${f(im.pitch)} · крен ${f(im.roll)} · поворот ${im.wz.toFixed(0)}°/с`;
+  dl('#tImu', [['наклон камеры', f(im.pitch)], ['крен', f(im.roll)], ['поворот', im.wz.toFixed(1) + ' °/с'],
+               ['курс с включения', f(im.yaw, 0)], ['|g|', im.g.toFixed(2) + ' м/с²' + (Math.abs(im.g - 9.81) > 1.5 ? ' · <span class="badc">трясёт</span>' : '')]]);
 }
 depthConnect();
 

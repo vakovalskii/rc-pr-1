@@ -1,0 +1,14 @@
+# PPP поверх L2TP к MikroTik. Пароль — в /etc/ppp/options.l2tpd.office на Pi 4, сюда не пишем.
+name rc-buggy
+password __L2TP_PASS__
+noauth
+refuse-eap
+noccp
+nodefaultroute
+mtu 1400
+mru 1400
+persist
+maxfail 0
+holdoff 5
+lcp-echo-interval 10
+lcp-echo-failure 4

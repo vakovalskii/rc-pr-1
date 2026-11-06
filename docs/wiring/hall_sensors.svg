@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1260" viewBox="0 0 2000 1260" font-family="Arial, Helvetica, sans-serif">
+  <rect width="2000" height="1260" fill="#f7f7f5"/>
+  <text x="40" y="62" font-size="36" font-weight="bold" fill="#1b1f24">Датчик Холла на задний кардан → ESP8266 (NodeMCU)</text>
+  <text x="40" y="100" font-size="22" fill="#5b6058">Цвет линии = цвет провода. Питание датчика только от 3V3 ESP, не от Vin и не от 5 В. Один датчик — на задний карданный вал.</text>
+
+  <!-- ESP8266 -->
+  <rect x="60" y="150" width="440" height="660" rx="16" fill="#262626"/>
+  <text x="80" y="195" font-size="32" font-weight="bold" fill="#fff">ESP8266 (NodeMCU)</text>
+  <text x="80" y="228" font-size="20" fill="#cfcfcf">ход, руль + счётчик оборотов</text>
+  <g font-size="24" font-weight="bold" fill="#fff" text-anchor="end">
+    <text x="480" y="308">3V3 ¹</text>
+    <text x="480" y="368">GND ²</text>
+    <text x="480" y="428">D2 (GPIO4)</text>
+  </g>
+  <g font-size="18" fill="#a9a9a9">
+    <text x="80" y="728">уже заняты: D1 — регулятор хода,</text>
+    <text x="80" y="752">D5/D6 — руль, D4 — светодиод,</text>
+    <text x="80" y="776">A0 — потенциометр, RX/TX — малина</text>
+  </g>
+  <text x="480" y="658" font-size="24" font-weight="bold" fill="#777" text-anchor="end">D7 (GPIO13)</text>
+  <circle cx="500" cy="650" r="8" fill="#555" stroke="#3a3a3a" stroke-width="2"/>
+  <line x1="500" y1="650" x2="980" y2="650" stroke="#9aa0a6" stroke-width="4" stroke-dasharray="10 8"/>
+  <text x="560" y="638" font-size="19" fill="#7b8087">свободен — на случай второго датчика на передний вал</text>
+  <rect x="530" y="468" width="860" height="104" rx="10" fill="#fff4e0" stroke="#d98a00" stroke-width="2"/>
+  <text x="548" y="496" font-size="19" font-weight="bold" fill="#8a5300">Все 3V3 (3 шт.) и GND (4 шт.) на NodeMCU уже заняты — так освободить:</text>
+  <text x="548" y="524" font-size="17" fill="#1b1f24">¹ на DRV8837 перемкни VCC и SLEEP, провод ESP 3V3 → SLEEP сними — этот 3V3 для датчика</text>
+  <text x="548" y="552" font-size="17" fill="#1b1f24">² земля датчика — на свободный нижний GND правого ряда DRV8837 (та же общая земля)</text>
+
+  <!-- провода: датчик 1 -->
+  <g stroke-width="6" fill="none">
+    <line x1="500" y1="300" x2="1000" y2="300" stroke="#d62828"/>
+    <line x1="500" y1="360" x2="1000" y2="360" stroke="#1b1b1b"/>
+    <line x1="500" y1="420" x2="1000" y2="420" stroke="#e0b000"/>
+  </g>
+  <g font-size="19" font-weight="bold">
+    <text x="560" y="290" fill="#d62828">красный — плюс 3.3 В</text>
+    <text x="560" y="350" fill="#1b1b1b">чёрный — земля</text>
+    <text x="560" y="410" fill="#a07c00">жёлтый — сигнал (импульсы вала)</text>
+  </g>
+
+  <!-- датчик 1 -->
+  <rect x="1000" y="250" width="380" height="210" rx="14" fill="#24508f"/>
+  <g font-size="24" font-weight="bold" fill="#fff">
+    <text x="1022" y="308">+</text><text x="1022" y="368">−</text><text x="1022" y="428">S</text>
+  </g>
+  <text x="1110" y="300" font-size="26" font-weight="bold" fill="#fff">Датчик Холла</text>
+  <text x="1110" y="334" font-size="20" fill="#d6e2f5">KY-003, 3 ножки</text>
+  <text x="1110" y="362" font-size="20" fill="#d6e2f5">задний кардан</text>
+  <text x="1110" y="420" font-size="17" fill="#b9cbe9">светодиод горит = магнит рядом</text>
+  <rect x="1380" y="345" width="34" height="30" fill="#111"/>
+  <text x="1424" y="368" font-size="17" fill="#5b6058">чип</text>
+
+  <!-- точки пинов -->
+  <g fill="#f0c419" stroke="#3a3a3a" stroke-width="2">
+    <circle cx="500" cy="300" r="8"/><circle cx="500" cy="360" r="8"/><circle cx="500" cy="420" r="8"/>
+    <circle cx="1000" cy="300" r="8"/><circle cx="1000" cy="360" r="8"/><circle cx="1000" cy="420" r="8"/>
+  </g>
+
+  <!-- вал -->
+  <text x="1580" y="195" font-size="26" font-weight="bold" fill="#1b1f24">Как ставить на вал</text>
+  <rect x="1630" y="235" width="150" height="62" rx="8" fill="#24508f"/>
+  <text x="1705" y="273" font-size="18" fill="#fff" text-anchor="middle">датчик (на раме)</text>
+  <rect x="1688" y="297" width="34" height="24" fill="#111"/>
+  <!-- зазор -->
+  <line x1="1760" y1="321" x2="1760" y2="352" stroke="#d62828" stroke-width="3"/>
+  <line x1="1748" y1="321" x2="1772" y2="321" stroke="#d62828" stroke-width="3"/>
+  <line x1="1748" y1="352" x2="1772" y2="352" stroke="#d62828" stroke-width="3"/>
+  <text x="1782" y="344" font-size="19" font-weight="bold" fill="#d62828">зазор 2–4 мм</text>
+  <!-- сам вал -->
+  <rect x="1560" y="366" width="380" height="64" rx="10" fill="#8d939b"/>
+  <rect x="1560" y="366" width="380" height="18" rx="8" fill="#b3b8bf"/>
+  <rect x="1540" y="356" width="30" height="84" rx="6" fill="#5d636b"/>
+  <rect x="1930" y="356" width="30" height="84" rx="6" fill="#5d636b"/>
+  <rect x="1690" y="352" width="30" height="14" fill="#c0392b"/>
+  <text x="1705" y="363" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle">S</text>
+  <rect x="1690" y="430" width="30" height="14" fill="#c0392b"/>
+  <text x="1705" y="441" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle">S</text>
+  <text x="1750" y="410" font-size="18" fill="#fff">карданный вал</text>
+  <g font-size="18" fill="#1b1f24">
+    <text x="1560" y="478">• 2 магнита 3×2 мм напротив (или 4 через 90°),</text>
+    <text x="1560" y="502">  оба южным полюсом наружу</text>
+    <text x="1560" y="534">• 1 оборот вала = 2 импульса (4 при 4 магнитах)</text>
+    <text x="1560" y="566">• магниты на суперклей + термоусадка</text>
+    <text x="1560" y="590">  или изоленту сверху</text>
+    <text x="1560" y="622">• датчик крепить к раме, не к подвеске:</text>
+    <text x="1560" y="646">  валы на раме, зазор не гуляет</text>
+    <text x="1560" y="678">• м на импульс — проездом 5 м</text>
+  </g>
+
+  <line x1="40" y1="845" x2="1960" y2="845" stroke="#d9dbd4" stroke-width="2"/>
+
+  <!-- KY-024 -->
+  <text x="60" y="895" font-size="26" font-weight="bold" fill="#1b1f24">Если пришёл KY-024 (4 ножки, с подстроечником)</text>
+  <rect x="80" y="925" width="280" height="230" rx="14" fill="#24508f"/>
+  <text x="110" y="965" font-size="22" font-weight="bold" fill="#fff">KY-024</text>
+  <rect x="110" y="985" width="44" height="44" rx="6" fill="#2f78d0" stroke="#fff" stroke-width="2"/>
+  <text x="110" y="1060" font-size="16" fill="#d6e2f5">подстроечник</text>
+  <g font-size="22" font-weight="bold" fill="#fff" text-anchor="end">
+    <text x="345" y="968">A0</text><text x="345" y="1018">G</text><text x="345" y="1068">+</text><text x="345" y="1118">D0</text>
+  </g>
+  <g stroke-width="6">
+    <line x1="360" y1="960" x2="520" y2="960" stroke="#9aa0a6" stroke-dasharray="10 8"/>
+    <line x1="360" y1="1010" x2="520" y2="1010" stroke="#1b1b1b"/>
+    <line x1="360" y1="1060" x2="520" y2="1060" stroke="#d62828"/>
+    <line x1="360" y1="1110" x2="520" y2="1110" stroke="#e0b000"/>
+  </g>
+  <g fill="#f0c419" stroke="#3a3a3a" stroke-width="2">
+    <circle cx="360" cy="960" r="8"/><circle cx="360" cy="1010" r="8"/><circle cx="360" cy="1060" r="8"/><circle cx="360" cy="1110" r="8"/>
+  </g>
+  <g font-size="21" font-weight="bold">
+    <text x="535" y="967" fill="#7b8087">не подключать</text>
+    <text x="535" y="1017" fill="#1b1b1b">GND</text>
+    <text x="535" y="1067" fill="#d62828">3V3</text>
+    <text x="535" y="1117" fill="#a07c00">D2 (GPIO4)</text>
+  </g>
+  <text x="80" y="1195" font-size="19" fill="#1b1f24">Подстроечник крутить, пока светодиод не начнёт загораться от магнита в 2–4 мм</text>
+  <text x="80" y="1221" font-size="19" fill="#1b1f24">и гаснуть без него. Горит постоянно — крути в другую сторону.</text>
+
+  <!-- советы -->
+  <rect x="1000" y="870" width="960" height="365" rx="14" fill="#eaf5ec" stroke="#1f7a3a" stroke-width="2"/>
+  <text x="1025" y="912" font-size="24" font-weight="bold" fill="#1f5c3a">Проверка до монтажа на машинку</text>
+  <g font-size="19" fill="#1b1f24">
+    <text x="1025" y="952">1. Подключил → поднеси магнит к чипу: на плате датчика загорается светодиод.</text>
+    <text x="1025" y="980">    Не горит — переверни магнит: KY-003 видит только один полюс.</text>
+    <text x="1025" y="1018">2. Только 3V3. От Vin или 5 В нельзя — подтяжка на плате датчика</text>
+    <text x="1025" y="1046">    выдаст 5 В на вход ESP.</text>
+    <text x="1025" y="1084">3. Три провода скрутить косичкой, вести подальше от проводов мотора.</text>
+    <text x="1025" y="1122">4. Ложные импульсы → конденсатор 100 нФ между + и − прямо у датчика.</text>
+    <text x="1025" y="1160">5. D2 выбран не случайно: D3, D4, D8 влияют на загрузку ESP,</text>
+    <text x="1025" y="1188">    а на D0 нет прерываний.</text>
+    <text x="1025" y="1220" fill="#5b6058">Прошивка ESP уже считает импульсы на D2 — скорость видна в пульте.</text>
+  </g>
+</svg>

@@ -28,43 +28,6 @@
   #novideo{position:fixed;inset:0;display:grid;place-items:center;color:var(--faint);font-size:14px;pointer-events:none}
   #novideo.hide{display:none}
 
-  /* второе окно: камера глубины */
-  #depthPane{position:fixed;display:none;background:#07080a}
-  #depthPane img{width:100%;height:100%;object-fit:contain;display:block}
-  body.split #view{right:auto;width:50%}
-  body.split #depthPane{display:block;top:0;bottom:0;left:50%;right:0;border-left:2px solid #000}
-  @media (orientation:portrait){
-    body.split #view{width:100%;height:50%;bottom:auto}
-    body.split #depthPane{left:0;top:50%;border-left:0;border-top:2px solid #000}
-  }
-  body.split #osdCross{left:25%} @media (orientation:portrait){ body.split #osdCross{left:50%;top:25%} }
-  #dInfo{position:absolute;left:0;right:0;top:calc(env(safe-area-inset-top) + 58px);text-align:center;pointer-events:none;
-    font:600 14px/1.3 var(--mono);color:#f4f2ec;text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 4px #000}
-  #paneCtl{position:absolute;left:14px;top:calc(env(safe-area-inset-top) + 194px);z-index:7;display:flex;gap:8px;flex-wrap:wrap}
-  #recBtn{font:600 13px/1 system-ui,-apple-system,sans-serif;
-    color:#f3efe6;background:#15181dd9;border:1px solid #3a3f47;border-radius:8px;padding:10px 12px;cursor:pointer;touch-action:manipulation}
-  #recBtn:disabled{opacity:.4;cursor:default}
-  #recBtn.on{background:#b91c1c;border-color:#ef4444}
-  #recBtn .rd{color:#ef4444} #recBtn.on .rd{color:#fff;animation:blink 1s steps(2) infinite}
-  #dInfo .lbl{color:#cfcabd;font-size:11px;font-weight:700;letter-spacing:.08em}
-  #dAhead{font-size:30px;display:block}
-  #dImu{display:block;margin-top:4px;font-size:12px;color:#e6e2d8}
-  #dImu:empty{display:none}
-  #dHor{display:inline-block;vertical-align:middle;width:22px;height:22px;margin-right:6px;border:1.5px solid #e6e2d8;border-radius:50%;
-    position:relative;overflow:hidden;box-shadow:0 0 3px #000}
-  #dHor i{position:absolute;left:-4px;right:-4px;top:50%;height:2px;margin-top:-1px;background:var(--amber);transition:transform .15s var(--ease)}
-  @media (prefers-reduced-motion:reduce){#dHor i{transition:none}}
-  #dAhead.near{color:var(--bad)} #dAhead.mid{color:var(--warn)}
-  #dBox{position:absolute;left:33.3%;width:33.3%;top:30%;height:45%;border:2px dashed #ffffff8c;pointer-events:none}
-  #dOff{position:absolute;inset:0;display:grid;place-items:center;color:var(--faint);font-size:14px}
-  #paneTabs{display:flex;
-    background:#15181dd9;border:1px solid #3a3f47;border-radius:8px;overflow:hidden}
-  #paneTabs button{background:none;border:0;padding:9px 12px;font:600 13px/1 var(--sans);color:#cfcabd;cursor:pointer;touch-action:manipulation}
-  #paneTabs button.on{background:var(--amber);color:var(--amber-ink)}
-  #map3dFrame{position:absolute;inset:0;width:100%;height:100%;border:0;display:none;background:#0d0f12}
-  #depthPane.m3d #map3dFrame{display:block}
-  #depthPane.m3d #depthImg, #depthPane.m3d #dBox, #depthPane.m3d #dInfo, #depthPane.m3d #dOff{display:none!important}
-
   @media (orientation:portrait) and (max-width:600px){
     #osdTL,#osdTR,#osdThr,#osdThrV,.hint,#state{display:none!important}
     #top{gap:5px;padding-left:8px;padding-right:8px} #top .btn{padding:0 7px;font-size:12px;min-width:0} #top .pill{padding:0 9px;font-size:12px} #link{display:none}
@@ -143,7 +106,7 @@
   #scrim{position:fixed;inset:0;z-index:25;background:#0008;opacity:0;pointer-events:none;transition:opacity .2s var(--ease)}
   #scrim.on{opacity:1;pointer-events:auto}
 
-  #mini{position:fixed;z-index:6;right:calc(env(safe-area-inset-right) + 12px);top:calc(env(safe-area-inset-top) + 250px);   /* под блоком «Zero / ESP» */
+  #mini{position:fixed;z-index:6;right:calc(env(safe-area-inset-right) + 12px);top:calc(env(safe-area-inset-top) + 250px);   /* под блоком «борт / ESP» */
     
     width:150px;height:150px;border:1px solid var(--line);border-radius:8px;background:#15181dd9;display:none;pointer-events:none}
   .hit{animation:hit .4s} @keyframes hit{from{background:#7f1d1d}to{background:#15181dd9}}
@@ -157,11 +120,6 @@
   #osd .big{font-size:20px}
   .grp{font:700 10px/1.2 var(--mono);letter-spacing:.12em;color:var(--amber);margin-top:8px}
   .grp:first-child{margin-top:0}
-  #dInfo .grp{display:block;margin:0 0 2px}
-  @media (orientation:landscape){
-    body.split #osdTR{right:calc(50% + 14px);top:calc(env(safe-area-inset-top) + 128px)}   /* правый край окна видео, под кнопками газа/руля */
-    body.split #mini{display:none!important}
-  }
   #osdTL{left:calc(env(safe-area-inset-left) + 18px);top:calc(env(safe-area-inset-top) + 62px)}
   #osdTR{right:calc(env(safe-area-inset-right) + 18px);top:calc(env(safe-area-inset-top) + 62px);align-items:flex-end}
   #osdCross{position:absolute;left:50%;top:50%;width:28px;height:28px;margin:-14px 0 0 -14px;opacity:.75}
@@ -183,7 +141,7 @@
   .bars{display:inline-flex;gap:2px;align-items:flex-end;height:14px;margin-left:6px;vertical-align:-1px}
   .bars span{width:4px;background:#f4f2ec;box-shadow:0 0 0 1px #000;opacity:.25}
   .bars span.on{opacity:1}
-  @media (max-height:460px){ #mini{display:none!important}   /* на телефоне места нет — карта во вкладке «3D» */
+  @media (max-height:460px){ #mini{display:none!important}   /* на телефоне места нет */
     #osdTL,#osdTR{top:calc(env(safe-area-inset-top) + 56px)} #osd{font-size:12px} #osd .big{font-size:16px}
     #osdThr,#osdThrV{display:none} }
   body.osd .wide,body.osd #wifiPill{display:none!important}
@@ -195,14 +153,6 @@
   #osdQuick button:disabled{opacity:.3;cursor:default}
   #osdQuick .val{min-width:64px;text-align:center}
   #osdQuick .k{display:none;color:#cfcabd;font-size:10px} @media (hover:hover){ #osdQuick .k{display:block} }
-
-  /* окно карты открыто: джойстики — квадраты в нижних углах, остальное окно карты крутится пальцем/мышью */
-  .sm{display:none}
-  body.m3d #pads{pointer-events:none}
-  body.m3d .pad{position:absolute;bottom:0;flex:none;width:min(300px,42vw);height:min(300px,56vh);pointer-events:auto}
-  body.m3d #padT{left:0} body.m3d #padS{right:0}
-  body.m3d #padT .stick, body.m3d #padS .stick{left:50%}
-  body.m3d .hint{display:none}
 
   /* телефон: iPhone 16 — 852×393 лёжа (в Safari ~852×370), 393×852 стоя (~393×660) */
   @media (max-height:460px), (max-width:600px){
@@ -216,14 +166,8 @@
     .knob{width:46px;height:46px;margin:-23px 0 0 -23px}
     .readout,.hint{display:none}
     #osdSteer{bottom:calc(env(safe-area-inset-bottom) + 10px)} #osdSteerV{bottom:calc(env(safe-area-inset-bottom) + 24px)}
-    #paneCtl{left:8px;top:calc(env(safe-area-inset-top) + 86px);gap:6px}
-    #paneTabs button{padding:7px 10px;font-size:12px} #recBtn{padding:7px 10px;font-size:12px}
-    #dInfo{top:calc(env(safe-area-inset-top) + 124px);font-size:11px} #dAhead{font-size:22px}
-    body.split #osdTR, body.split #mini{display:none!important}
-    body.m3d .pad{width:min(170px,45vw);height:min(170px,45vh)}
   }
   @media (orientation:portrait) and (max-width:600px){
-    #paneCtl{top:8px} #dInfo{top:46px}
     #osdQuick{top:calc(env(safe-area-inset-top) + 44px)}
   }
 
@@ -233,13 +177,6 @@
 <body>
 <img id="view" alt="">
 <div id="novideo">ждём видео с машинки…</div>
-<div id="depthPane"><img id="depthImg" alt=""><div id="dBox"></div>
-  <iframe id="map3dFrame" title="живая 3D-карта"></iframe>
-  <div id="paneCtl"><div id="paneTabs"><button id="tabDepth" class="on">глубина</button><button id="tabMap"><span class="lg">3D-карта</span><span class="sm">3D</span></button></div>
-  <button id="recBtn" disabled title="запись глубины и цвета для 3D-карты (SLAM)"><span class="rd">●</span> <span id="recTxt">запись 3D</span></button></div>
-  <div id="dInfo"><span class="grp">D455 · ГЛУБИНА + IMU</span><span class="lbl">ВПЕРЕДИ</span><span id="dAhead">—</span><span id="dMeta"></span><span id="dImu"></span></div>
-  <div id="dOff">камера глубины не на связи</div></div>
-
 <div id="top">
   <div class="pill"><span class="dot" id="dot"></span><b id="link">нет связи</b></div>
   <div class="pill" id="state">—</div>
@@ -251,8 +188,6 @@
   <span class="grow"></span>
   <button class="btn" id="gpBtn" style="display:none" title="геймпад подключён">геймпад</button>
   <button class="btn" id="resetBtn" style="display:none" title="на старт (R)">↺ старт</button>
-  <button class="btn" id="depthBtn" title="второе окно: камера глубины (G)"><span class="lg">глубина</span><span class="sm">глуб</span></button>
-  <button class="btn" id="mapBtn" title="правое окно: живая 3D-карта и проходимость (M)"><span class="lg">3D-карта</span><span class="sm">3D</span></button>
   <button class="btn on" id="osdBtn" title="показания поверх видео (O)">OSD</button>
   <button class="btn" data-open="tele" title="телеметрия"><span class="lg">телеметрия</span><span class="sm">тлм</span></button>
   <button class="btn" data-open="set" title="настройки"><span class="lg">настройки</span><span class="sm">⚙</span></button>
@@ -263,19 +198,21 @@
     <span class="grp">СВЯЗЬ</span>
     <span><span class="lbl">ВРЕМЯ </span><span class="big" id="oTime">00:00</span></span>
     <span title="команда с пульта → ответ машинки"><span class="lbl">ОТКЛИК </span><span id="oRtt">—</span></span>
-    <span title="кадры с камеры Zero: частота · задержка"><span class="lbl">ВИДЕО </span><span id="oFps">—</span></span>
+    <span title="кадры с FPV-камеры: частота · задержка"><span class="lbl">ВИДЕО </span><span id="oFps">—</span></span>
     <span class="grp" id="o4gHead" style="display:none">4G · МОДЕМ</span>
     <span id="o4gRow" style="display:none"><span class="lbl">СИГНАЛ </span><span id="o4g">—</span><span class="bars" id="o4gBars"><span style="height:4px"></span><span style="height:7px"></span><span style="height:10px"></span><span style="height:14px"></span></span></span>
   </div>
   <div class="blk" id="osdTR">
-    <span class="grp">ZERO · БОРТ</span>
-    <span title="Wi-Fi платы Zero"><span class="lbl">WI-FI </span><span id="oWifi">—</span><span class="bars" id="oBars"><span style="height:4px"></span><span style="height:7px"></span><span style="height:10px"></span><span style="height:14px"></span></span></span>
+    <span class="grp">PI 4 · БОРТ</span>
+    <span title="Wi-Fi Pi 4"><span class="lbl">WI-FI </span><span id="oWifi">—</span><span class="bars" id="oBars"><span style="height:4px"></span><span style="height:7px"></span><span style="height:10px"></span><span style="height:14px"></span></span></span>
     <span><span class="lbl">ТЕМП </span><span id="oTemp">—</span></span>
     <span><span class="lbl">НАГРУЗКА </span><span id="oCpu">—</span></span>
     <span id="oVolt" style="color:var(--bad);display:none">ПИТАНИЕ ПРОСЕЛО</span>
     <span class="grp">ESP · ХОД И РУЛЬ</span>
     <span title="сигнал на регулятор хода, 1500 — нейтраль"><span class="lbl">ESC </span><span id="oEsc">—</span></span>
     <span id="oPotRow" title="потенциометр сервы руля"><span class="lbl">ДАТЧИК РУЛЯ </span><span id="oPot">—</span></span>
+    <span id="oSpdRow" style="display:none" title="датчик Холла на заднем кардане"><span class="lbl">СКОРОСТЬ </span><span class="big" id="oSpd">—</span></span>
+    <span id="oOdoRow" style="display:none" title="пройдено с запуска · радиус поворота по рулю"><span class="lbl">ПУТЬ </span><span id="oOdo">—</span></span>
   </div>
   <div id="osdQuick">
     <div class="q"><button data-q="thr" data-d="-10" aria-label="меньше газа">−</button>
@@ -310,6 +247,23 @@
 
 <aside class="drawer" id="set" aria-label="Настройки">
   <header><h2>Настройки</h2><button class="btn" data-close>готово</button></header>
+
+  <h3>Видео</h3>
+  <div class="row" style="grid-template-columns:1fr"><label>Качество</label>
+    <div class="seg" id="vPreset"><button class="btn" data-v="320,15,0.8">эконом</button><button class="btn" data-v="640,30,3">норма</button><button class="btn" data-v="960,30,6">чётко</button><button class="btn" data-v="1296,30,10">макс</button></div>
+    <small>Меняется на машинке сразу, картинка моргнёт на полсекунды. Выбор запоминается.</small></div>
+  <div class="row" style="grid-template-columns:1fr"><label>Размер</label>
+    <div class="seg" id="vSize"><button class="btn" data-w="320">320</button><button class="btn" data-w="480">480</button><button class="btn" data-w="640">640</button><button class="btn" data-w="800">800</button><button class="btn" data-w="960">960</button><button class="btn" data-w="1296">1296</button></div>
+    <small>Ширина кадра, пропорция 4:3. Угол обзора тот же, меняется только детальность.</small></div>
+  <div class="row"><label for="vFps">Кадров в секунду</label><output id="vFpsV"></output>
+    <input type="range" id="vFps" min="5" max="40" step="5" data-video>
+    <small>Больше — плавнее, но и трафика больше.</small></div>
+  <div class="row"><label for="vMbit">Битрейт</label><output id="vMbitV"></output>
+    <input type="range" id="vMbit" min="0.5" max="15" step="0.5" data-video>
+    <small>Сколько мегабит в секунду даётся кодеру. Мало — квадраты и мыло, много — канал не вытянет и вырастет задержка.</small></div>
+  <div class="row" id="vShrinkRow" style="grid-template-columns:1fr;display:none"><label>Сжатие для интернета</label>
+    <div class="seg" id="vShrink"><button class="btn" data-s="0">как с камеры</button><button class="btn" data-s="1">480</button><button class="btn" data-s="2">256</button></div>
+    <small>Ты зашёл не из домашней сети: релей пережимает кадры только для тебя, чтобы не росла задержка. «Как с камеры» — без пережатия.</small></div>
 
   <h3>Газ</h3>
   <div class="row"><label for="maxThr">Максимум газа</label><output id="maxThrV"></output>
@@ -366,9 +320,8 @@
   <h3>Руль</h3><dl class="tele" id="tSteer"></dl>
   <h3>Ход</h3><dl class="tele" id="tDrive"></dl>
   <h3>Связь</h3><dl class="tele" id="tLink"></dl>
-  <h3>4G модема</h3><dl class="tele" id="t4g"><dt>данных нет</dt><dd>—</dd></dl>
+  <h3 id="t4gHead" style="display:none">4G модема</h3><dl class="tele" id="t4g"></dl>
   <h3>Борт</h3><dl class="tele" id="tPi"></dl>
-  <h3>IMU камеры</h3><dl class="tele" id="tImu"><dt>данных нет</dt><dd>—</dd></dl>
 </aside>
 
 <script>
@@ -404,6 +357,7 @@ function connect(){
     }
     const m = JSON.parse(e.data);
     if (m.type === 'modem') { modemShow(m); return; }
+    if (m.type === 'view') { viewShow(m); return; }
     if (m.type === 'pilot') { $('#apPill').style.display = m.online ? 'flex' : 'none'; return; }
     if (m.type !== 'tele') return;
     const t0 = pending.get(m.ack);
@@ -414,7 +368,7 @@ function connect(){
     if (m.ft) {                                // задержка видео: от кодера на машинке до пульта (часы обеих по NTP)
       const l = Date.now() - m.ft; if (l > -50 && l < 5000) latEMA = latEMA === null ? l : latEMA * .85 + l * .15;
     }
-    last = m; setState(m); syncEsp(m); renderTele(m); osdTele(m);
+    last = m; setState(m); syncEsp(m); videoSync(m.vid); renderTele(m); osdTele(m);
     if (m.wifi_dbm !== undefined) { $('#wifiPill').style.display = 'flex'; $('#wifi').textContent = m.wifi_dbm; }
     if (m.x !== undefined) {
       $('#pos').style.display = 'flex'; $('#resetBtn').style.display = '';
@@ -434,6 +388,38 @@ function setState(m){
 connect();
 const sendJSON = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
 const espCmd = c => sendJSON({type: 'esp', cmd: c});
+
+// ---------- видео: размер, частота, битрейт на машинке; сжатие релеем для этого пульта ----------
+let vid = null, vTouch = 0;
+const vSend = o => { vTouch = performance.now(); sendJSON({type: 'video', ...o}); };
+const vShow = v => {
+  $('#vFpsV').textContent = v.fps; $('#vMbitV').textContent = v.mbit + ' Мбит';
+  $$('#vSize .btn').forEach(b => b.classList.toggle('on', +b.dataset.w === v.w));
+  $$('#vPreset .btn').forEach(b => { const [w, f, m] = b.dataset.v.split(',').map(Number);
+    b.classList.toggle('on', w === v.w && f === v.fps && m === v.mbit); });
+};
+function videoSync(v){
+  if (!v || performance.now() - vTouch < 1500) return;   // пока крутишь ползунок — не перебивать телеметрией
+  vid = v; $('#vFps').value = v.fps; $('#vMbit').value = v.mbit; vShow(v);
+}
+$$('#vPreset .btn').forEach(b => b.addEventListener('click', () => {
+  const [w, fps, mbit] = b.dataset.v.split(',').map(Number); vSend({w, h: w * 3 / 4, fps, mbit});
+  if (vid) { vid = {...vid, w, h: w * 3 / 4, fps, mbit}; $('#vFps').value = fps; $('#vMbit').value = mbit; vShow(vid); }
+}));
+$$('#vSize .btn').forEach(b => b.addEventListener('click', () => {
+  const w = +b.dataset.w; vSend({w, h: w * 3 / 4}); if (vid) { vid = {...vid, w, h: w * 3 / 4}; vShow(vid); }
+}));
+$$('[data-video]').forEach(el => {
+  el.addEventListener('input', () => { vTouch = performance.now();
+    if (vid) vShow({...vid, fps: +$('#vFps').value, mbit: +$('#vMbit').value}); });
+  el.addEventListener('change', () => { const o = {fps: +$('#vFps').value, mbit: +$('#vMbit').value};
+    vSend(o); if (vid) { vid = {...vid, ...o}; vShow(vid); } });
+});
+function viewShow(m){
+  $('#vShrinkRow').style.display = m.remote ? '' : 'none';
+  $$('#vShrink .btn').forEach(b => b.classList.toggle('on', +b.dataset.s === m.shrink));
+}
+$$('#vShrink .btn').forEach(b => b.addEventListener('click', () => sendJSON({type: 'view', shrink: +b.dataset.s})));
 
 // 20 Гц ровный пульс команд: failsafe на борту получает предсказуемый поток
 setInterval(() => {
@@ -458,9 +444,6 @@ function bindPad(el, axis, set){
   const knob = el.querySelector('.knob'); let id = null, o = 0;
   const R = 84;
   el.addEventListener('pointerdown', e => {
-    // окно глубины — свой слой (fixed) под зоной стиков: его кнопки сами клик не получат. Нажали на кнопку — жмём её, стик не берём
-    const b = document.elementsFromPoint(e.clientX, e.clientY).map(x => x.closest && x.closest('#paneCtl button')).find(Boolean);
-    if (b) { b.click(); return; }
     id = e.pointerId; o = axis === 'y' ? e.clientY : e.clientX; el.setPointerCapture(id); });
   el.addEventListener('pointermove', e => {
     if (e.pointerId !== id) return;
@@ -581,65 +564,21 @@ function osdTele(m){
   $('#oEsc').textContent = m.esc_us !== undefined ? m.esc_us + ' мкс' : '—';
   $('#oPotRow').style.display = m.pot !== undefined ? '' : 'none';
   if (m.pot !== undefined) $('#oPot').textContent = m.pot;
+  const odo = m.odo_kmh !== undefined;
+  $('#oSpdRow').style.display = $('#oOdoRow').style.display = odo ? '' : 'none';
+  if (odo) {
+    $('#oSpd').textContent = Math.abs(m.odo_kmh).toFixed(1) + ' км/ч' + (m.odo_kmh < -0.05 ? ' ◂' : '');
+    $('#oOdo').textContent = m.odo_m + ' м' + (m.odo_r_m ? ' · R ' + m.odo_r_m + ' м' : '');
+  }
   $('#oVolt').style.display = m.undervolt ? '' : 'none';
 }
 setInterval(() => { $('#oFps').textContent = $('#fps').textContent + ' к/с · ' + $('#vlat').textContent + ' мс'; }, 1000);
 (function loop(){ osdTick(); requestAnimationFrame(loop); })();
 
-// ---------- второе окно: камера глубины ----------
-let splitOn = false; try { splitOn = localStorage.getItem('split') === '1'; } catch {}
-function setSplit(v){ splitOn = v; document.body.classList.toggle('split', v); $('#depthBtn').classList.toggle('on', v); syncM3d(); depthSync();
-  try { localStorage.setItem('split', v ? '1' : '0'); } catch {} }
-setSplit(splitOn);
-$('#depthBtn').addEventListener('click', () => setSplit(!splitOn));
-addEventListener('keydown', e => { if (e.code === 'KeyG' && e.target.tagName !== 'INPUT') setSplit(!splitOn); });
-let dws, dDirect = null, dSrc = null, dBusy = false, dLast = 0, dSeen = false;
-function depthConnect(){
-  dws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/depthview`); dws.binaryType = 'arraybuffer';
-  dws.onclose = () => setTimeout(depthConnect, 1500);
-  dws.onmessage = depthMsg;
-}
-// Pi 4 сама отдаёт кадры (релей присылает адрес) — подключаемся к ней напрямую, мимо эфира Zero
-// напрямую к Pi 4 — только пока окно глубины на экране: каждая открытая вкладка иначе тянет ~4 Мбит/с из эфира
-function depthWanted(){ return splitOn && paneTab !== 'map' && !document.hidden; }
-function depthDirect(){
-  if (!dSrc || dDirect || !depthWanted()) return;
-  dDirect = new WebSocket(dSrc); dDirect.binaryType = 'arraybuffer';
-  dDirect.onmessage = depthMsg;
-  dDirect.onclose = () => { dDirect = null; setTimeout(depthDirect, 1500); };
-}
-function depthSync(){
-  try { if (depthWanted()) depthDirect(); else if (dDirect) dDirect.close(); } catch {}
-}
-function depthMsg(e){
-  if (typeof e.data !== 'string') {
-    dLast = performance.now(); $('#dOff').style.display = 'none';
-    if (!dSeen) { dSeen = true; if (localStorage.getItem('split') === null) setSplit(true); }   // первый раз сами открываем окно
-    if (dBusy) return; dBusy = true;
-    const url = URL.createObjectURL(new Blob([e.data], {type: 'image/jpeg'})), img = $('#depthImg'), old = img.src;
-    img.onload = () => { dBusy = false; if (old.startsWith('blob:')) URL.revokeObjectURL(old); };
-    img.onerror = () => { dBusy = false; };
-    img.src = url; return;
-  }
-  const m = JSON.parse(e.data);
-  if (m.type === 'depthsrc') {
-    // камера на том же хосте, что релей: берём кадры через релей (/ws/depthdirect) — так работает и через туннель по https
-    if (/\/\/(127\.0\.0\.1|localhost):/.test(m.url)) m.url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/depthdirect`;
-    if (m.url !== dSrc) { dSrc = m.url; if (dDirect) dDirect.close(); else depthDirect(); } return; }
-  if (m.type !== 'depth') return;
-  if (m.online === false) { $('#dOff').style.display = ''; return; }
-  $('#dOff').style.display = 'none'; dLast = performance.now();   // цифры идут — камера на связи
-  const a = m.ahead, el = $('#dAhead');
-  el.textContent = a == null ? 'свободно' : a.toFixed(2) + ' м';
-  el.className = a == null ? '' : a < 0.5 ? 'near' : a < 1.0 ? 'mid' : '';
-  $('#dMeta').textContent = `центр ${m.center == null ? '—' : m.center.toFixed(2) + ' м'} · ${m.fps} к/с · USB ${m.usb}${dDirect && dDirect.readyState === 1 ? ' · напрямую' : ''}`;
-  imuShow(m.imu);
-  recState(m);
-}
 // 4G модема: RSRP — мощность сигнала вышки (дБм), SNR — сигнал/шум (дБ). Пороги — обычные для LTE.
 function modemShow(m){
-  $('#o4gRow').style.display = $('#o4gHead').style.display = m.net ? '' : 'none';
-  if (!m.net) { dl('#t4g', [['модем', 'не отвечает (Pi 4 не в его сети?)']]); return; }
+  $('#o4gRow').style.display = $('#o4gHead').style.display = $('#t4gHead').style.display = m.net ? '' : 'none';
+  if (!m.net) { $('#t4g').innerHTML = ''; return; }
   const r = m.rsrp, q = r == null ? 0 : r > -85 ? 4 : r > -95 ? 3 : r > -105 ? 2 : 1;
   const word = ['—', 'слабый', 'средний', 'хороший', 'отличный'][q];
   const cls = q >= 3 ? 'good' : q === 2 ? '' : 'badc';
@@ -651,60 +590,6 @@ function modemShow(m){
               ['сигнал/шум (SNR)', m.snr == null ? '—' : `${m.snr} дБ` + (m.snr < 0 ? ' · <span class="badc">помехи</span>' : '')],
               ['качество (RSRQ)', m.rsrq == null ? '—' : m.rsrq + ' дБ'], ['полоски модема', m.bars == null ? '—' : m.bars + ' из 5']]);
 }
-// IMU D455: наклон камеры вверх (+), крен вправо (+), поворот машинки влево (+), курс с включения — дрейфует
-function imuShow(im){
-  if (!im) { $('#dImu').innerHTML = ''; return; }
-  const f = (v, d = 1) => (v > 0 ? '+' : '') + v.toFixed(d) + '°';
-  $('#dImu').innerHTML = `<span id="dHor"><i style="transform:rotate(${-im.roll}deg) translateY(${Math.max(-9, Math.min(9, im.pitch / 4))}px)"></i></span>`
-    + `IMU: наклон ${f(im.pitch)} · крен ${f(im.roll)} · поворот ${im.wz.toFixed(0)}°/с`;
-  dl('#tImu', [['наклон камеры', f(im.pitch)], ['крен', f(im.roll)], ['поворот', im.wz.toFixed(1) + ' °/с'],
-               ['курс с включения', f(im.yaw, 0)], ['|g|', im.g.toFixed(2) + ' м/с²' + (Math.abs(im.g - 9.81) > 1.5 ? ' · <span class="badc">трясёт</span>' : '')]]);
-}
-depthConnect();
-
-// ---------- правое окно: глубина или живая 3D-карта (та же /map3d.html, встроенная) ----------
-let paneTab = 'depth'; try { paneTab = localStorage.getItem('paneTab') || 'depth'; } catch {}
-function setTab(t){
-  paneTab = t; const m = t === 'map';
-  if (m && !$('#map3dFrame').src) $('#map3dFrame').src = '/map3d.html?embed=1&v=' + Date.now();     // грузим только когда нужна
-  $('#depthPane').classList.toggle('m3d', m);
-  $('#tabDepth').classList.toggle('on', !m); $('#tabMap').classList.toggle('on', m);
-  $('#mapBtn').classList.toggle('on', m && splitOn);
-  try { localStorage.setItem('paneTab', t); } catch {}
-  syncM3d(); depthSync();
-}
-// карте: панель ставить сразу под вкладками (в координатах окна карты)
-function barTop(){ const c = $('#paneCtl'); return c.offsetTop + c.offsetHeight + 8; }
-function syncM3d(){
-  try {
-    document.body.classList.toggle('m3d', splitOn && paneTab === 'map');
-    const f = $('#map3dFrame'); if (f.contentWindow) f.contentWindow.postMessage({type: 'barTop', top: barTop()}, '*');
-  } catch {}                                                        // setSplit зовёт до объявления paneTab
-}
-$('#map3dFrame').addEventListener('load', syncM3d);
-document.addEventListener('visibilitychange', depthSync);
-addEventListener('resize', syncM3d);
-$('#tabDepth').onclick = () => setTab('depth');
-$('#tabMap').onclick = () => setTab('map');
-$('#mapBtn').onclick = () => { if (splitOn && paneTab === 'map') { setSplit(false); setTab('map'); } else { setSplit(true); setTab('map'); } };
-addEventListener('keydown', e => { if (e.code === 'KeyM' && e.target.tagName !== 'INPUT') $('#mapBtn').click(); });
-$('#depthBtn').addEventListener('click', () => { if (splitOn) setTab('depth'); else $('#mapBtn').classList.remove('on'); });
-setTab(paneTab);
-
-// ---------- запись для 3D-карты: Pi 4 пишет глубину + цвет, пульт показывает ход в реальном времени ----------
-let recOn = false;
-function recState(m){
-  recOn = m.rec !== undefined;
-  const b = $('#recBtn'); b.classList.toggle('on', recOn); b.disabled = !(dDirect && dDirect.readyState === 1);
-  if (!recOn) { $('#recTxt').textContent = 'запись 3D'; return; }
-  const s = Math.round(m.rec_s || 0);
-  $('#recTxt').textContent = `стоп · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} · ${m.rec} кадров${m.rec_drop ? ` (−${m.rec_drop})` : ''}`;
-}
-$('#recBtn').addEventListener('click', () => {
-  if (dDirect && dDirect.readyState === 1) dDirect.send(JSON.stringify({type: 'rec', on: !recOn}));
-});
-setInterval(() => { if (performance.now() - dLast > 3000) $('#dOff').style.display = ''; }, 1000);
-
 // ---------- панели ----------
 function closeDrawers(){ $$('.drawer').forEach(d => d.classList.remove('open')); $('#scrim').classList.remove('on');
   $$('[data-open]').forEach(b => b.classList.remove('on')); }
@@ -723,6 +608,7 @@ const FMT = {
   pwm: v => Math.round(v / 10) + '%', kp: v => v, thrExpo: v => v + '%', steerExpo: v => v + '%',
   kbThr: v => v + '%', kbRate: v => v + '%',
   brakeUs: v => v ? Math.round(v / 5) + '% назад' : 'выкл', brakeMs: v => v + ' мс',
+  vFps: v => v, vMbit: v => v + ' Мбит',
 };
 const ESPKEY = {maxThr: 'max_thr', acc: 'acc_ms', brk: 'brk_ms', pwm: 'steer_pwm_max', kp: 'steer_kp', brakeUs: 'brake_us', brakeMs: 'brake_ms'};
 const touched = {};   // слайдер, который двигали недавно, телеметрия не перетирает
@@ -768,7 +654,13 @@ function renderTele(m){
     ['ШИМ моторчика', m.steer_pwm], ['сила руля', m.steer_pwm_max !== undefined ? Math.round(m.steer_pwm_max / 10) + '%' : undefined],
     ['команда руля', m.steer !== undefined ? Math.round(m.steer * 100) + '%' : undefined]]);
   dl('#tDrive', [['команда газа', m.thr !== undefined ? Math.round(m.thr * 100) + '%' : undefined], ['сигнал регулятора', m.esc_us !== undefined ? m.esc_us + ' мкс' : undefined],
-    ['скорость', m.speed]]);
+    ['скорость', m.odo_kmh !== undefined ? `${m.odo_kmh} км/ч (макс ${m.odo_vmax_kmh})` : m.speed],
+    ['пройдено', m.odo_m !== undefined ? m.odo_m + ' м' : undefined],
+    ['радиус поворота', m.odo_kmh !== undefined ? (m.odo_r_m ? m.odo_r_m + ' м' : 'прямо') : undefined],
+    ['поворот курса', m.odo_yaw_rate !== undefined ? `${m.odo_yaw_rate} °/с · курс ${m.odo_yaw}°` : undefined],
+    ['позиция от старта', m.odo_x !== undefined ? `${m.odo_x}, ${m.odo_y} м` : undefined],
+    ['импульсы Холла', m.hall_n],
+    ['калибровка одометрии', m.odo_cal === undefined ? undefined : m.odo_cal ? '<span class="good">есть</span>' : '<span class="warnc">прикидка</span>']]);
   dl('#tLink', [['failsafe борта', yn(m.failsafe)], ['failsafe ESP', yn(m.esp_failsafe)],
     ['последний ответ ESP', m.esp_age_ms === null ? '<span class="badc">нет связи</span>' : (m.esp_age_ms !== undefined ? m.esp_age_ms + ' мс' : undefined)],
     ['Wi-Fi борта', m.wifi_dbm !== undefined ? `<span class="${m.wifi_dbm > -65 ? 'good' : m.wifi_dbm > -75 ? 'warnc' : 'badc'}">${m.wifi_dbm} дБм</span>` : undefined]]);

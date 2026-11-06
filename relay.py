@@ -27,6 +27,8 @@ def lowat(request, n=16 << 10):
             sock.setsockopt(socket.IPPROTO_TCP, 25, n)   # TCP_NOTSENT_LOWAT
         except OSError: pass
 
+SHRINK = {1: ((480, 360), 50), 2: ((256, 192), 30)}   # уровни сжатия для зрителя из интернета; 0 — кадр как с камеры
+
 def shrink(jpg, size=(256, 192), q=30):
     """Кадр для зрителя из интернета: 640x480 ~10 КБ → 256x192 q30 ~1.7 КБ (~10 мс на Pi 4). Для руления хватает,
     а 20 к/с — это ~0.3 Мбит/с, четверть отдачи 4G: очередь не копится, задержка ≈ пинг."""
@@ -61,7 +63,7 @@ class Box:
                     elif self.outq() > 3000: await asyncio.sleep(0.01)   # прошлый кадр ещё в пути — ждём, кадр тем временем свежеет
                     else:
                         f, self.frame = self.frame, None
-                        if self.small: f = await asyncio.get_running_loop().run_in_executor(None, shrink, f)
+                        if self.small: f = await asyncio.get_running_loop().run_in_executor(None, shrink, f, *SHRINK[self.small])
                         await self.ws.send_bytes(f)
         except asyncio.CancelledError: pass
         except Exception: self.on_fail()
@@ -163,7 +165,9 @@ async def ws_car(request):
 async def ws_pult(request):
     ws = web.WebSocketResponse()
     await ws.prepare(request); lowat(request)
-    hub.add_pult(ws, request.transport.get_extra_info("socket") if request.transport else None, small=not is_local(request))
+    remote = not is_local(request)
+    hub.add_pult(ws, request.transport.get_extra_info("socket") if request.transport else None, small=2 if remote else 0)
+    hub.boxes[ws].put(json.dumps({"type": "view", "remote": remote, "shrink": hub.boxes[ws].small}), False)
     if modem["last"]: hub.boxes[ws].put(json.dumps(modem["last"], ensure_ascii=False), False)
     print(f"[pult] подключился, всего {len(hub.pults)}")
     try:
@@ -173,6 +177,11 @@ async def ws_pult(request):
             try:
                 m = json.loads(msg.data)
             except Exception:
+                continue
+            if m.get("type") == "view":                   # {"type":"view","shrink":0|1|2} — сжатие кадров только этому пульту
+                b = hub.boxes.get(ws)
+                if b and m.get("shrink") in (0, 1, 2):
+                    b.small = m["shrink"]; b.put(json.dumps({"type": "view", "remote": remote, "shrink": b.small}), False)
                 continue
             if m.get("type") == "hello":                  # {"type":"hello","role":"pilot"}
                 if m.get("role") == "pilot":

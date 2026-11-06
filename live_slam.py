@@ -25,7 +25,7 @@ import open3d as o3d
 import aiohttp
 from PIL import Image
 from slam import Tracker
-from scan2d import Scan2D, planar, pose_T
+from scan2d import Grid, Scan2D, planar, pose_T
 
 ROOT = pathlib.Path(__file__).parent
 
@@ -33,72 +33,6 @@ def decode(b):
     L = int.from_bytes(b[4:8], "little"); meta = json.loads(b[8:8 + L]); o = 8 + L
     Lz = int.from_bytes(b[o:o + 4], "little")
     return meta, b[o + 4:o + 4 + Lz], b[o + 4 + Lz:]
-
-class Grid:
-    """Сетка занятости в выровненной системе: e1 — вперёд первой камеры по полу, e2 — влево, вверх — нормаль к полу."""
-    HIT, MISS, LIM = 0.9, 0.6, 4.0
-
-    def __init__(self, a):
-        self.a, self.n = a, int(a.grid_m / a.res)
-        self.L = np.zeros((self.n, self.n), np.float32); self.kfs = []; self.R = None; self.dirty = False
-
-    def set_up(self, up):
-        """Новое «вверх» → новые оси; если сильно повернулось — пересобрать сетку по всем ключевым кадрам."""
-        up = np.asarray(up, float); up /= np.linalg.norm(up)
-        if self.R is not None and math.degrees(math.acos(min(1, abs(float(up @ self.R[2]))))) < 2: return
-        f = np.array([0, 0, 1.0]); e1 = f - (f @ up) * up; e1 /= np.linalg.norm(e1)
-        self.R = np.stack([e1, np.cross(up, e1), up])
-        self.L[:] = 0
-        for T, pts in self.kfs: self._integrate(T, pts)
-        self.dirty = True
-
-    def cell(self, q):
-        return np.floor(q[..., :2] / self.a.res).astype(int) + self.n // 2
-
-    def add(self, T, pts):
-        if len(pts) > 2500: pts = pts[np.random.default_rng(0).choice(len(pts), 2500, replace=False)]
-        self.kfs.append((T.copy(), pts)); self._integrate(T, pts); self.dirty = True
-
-    def _integrate(self, T, pts):
-        a, R = self.a, self.R
-        q, qc = pts @ R.T, R @ T[:3, 3]
-        h = q[:, 2] + a.cam_height                       # высота над полом: камера первого кадра на cam_height
-        band = (h > a.z_min) & (h < a.z_max)
-        free = set()
-        for p in q[band][:: max(1, band.sum() // 800)]:  # лучи от камеры до препятствий: по пути свободно
-            d = np.linalg.norm(p[:2] - qc[:2]); k = max(int(d / a.res), 1)
-            t = np.arange(k)[:, None] / k
-            free.update(map(tuple, self.cell(qc[None, :2] + t * (p[None, :2] - qc[None, :2]))[:-1].tolist()))
-        occ = set(map(tuple, self.cell(q[band]).tolist()))
-        ok = lambda c: 0 <= c[0] < self.n and 0 <= c[1] < self.n
-        for c in free - occ:
-            if ok(c): self.L[c[1], c[0]] = max(-self.LIM, self.L[c[1], c[0]] - self.MISS)
-        for c in occ:
-            if ok(c): self.L[c[1], c[0]] = min(self.LIM, self.L[c[1], c[0]] + self.HIT)
-        cx, cy = self.cell(qc[None])[0]; r = int(math.ceil(a.car_radius / a.res))   # где проехали — свободно точно
-        yy, xx = np.mgrid[-r:r + 1, -r:r + 1]; m = xx ** 2 + yy ** 2 <= r * r
-        ys, xs = np.clip(cy + yy[m], 0, self.n - 1), np.clip(cx + xx[m], 0, self.n - 1)
-        self.L[ys, xs] = np.minimum(self.L[ys, xs], -2.0)
-
-    def render(self, kf_poses):
-        """→ (meta в формате map_build.py, PNG): 0 — препятствие, 255 — свободно, 128 — неизвестно, север сверху."""
-        a, L = self.a, self.L
-        known = np.argwhere(np.abs(L) > 0.3)
-        if not len(known): return None, None
-        (y0, x0), (y1, x1) = known.min(0) - 6, known.max(0) + 7
-        y0, x0 = max(y0, 0), max(x0, 0); y1, x1 = min(y1, self.n), min(x1, self.n)
-        g = np.full(L.shape, 128, np.uint8); g[L < -0.5] = 255; g[L > 0.6] = 0
-        g = g[y0:y1, x0:x1][::-1]
-        buf = io.BytesIO(); Image.fromarray(g).save(buf, "PNG")
-        org = [(x0 - self.n // 2) * a.res, (y0 - self.n // 2) * a.res]
-        kfs = []
-        for i, T in enumerate(kf_poses):
-            q = self.R @ T[:3, 3]; f = self.R @ (T[:3, :3] @ [0, 0, 1.0])
-            kfs.append({"i": i, "name": "", "x": round(float(q[0]), 3), "y": round(float(q[1]), 3), "yaw": round(math.atan2(f[1], f[0]), 3)})
-        meta = {"res": a.res, "origin": org, "width": int(x1 - x0), "height": int(y1 - y0), "cam_height": a.cam_height,
-                "spawn": kfs[0] if kfs else {"x": 0, "y": 0, "yaw": 0}, "keyframes": kfs[-400:], "source": "live_slam",
-                "R": self.R.round(5).tolist(), "floor": -a.cam_height}
-        return meta, buf.getvalue()
 
 class Live:
     def __init__(self, a, freeze_up=False):

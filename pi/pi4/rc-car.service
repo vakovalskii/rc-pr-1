@@ -1,0 +1,16 @@
+[Unit]
+Description=RC-багги: FPV-камера и ESP8266 по UART прямо на Pi 4 (Zero снята 2026-11-02)
+After=network-online.target rc-relay.service
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/rc
+ExecStartPre=/bin/sleep 2
+ExecStart=/usr/bin/python3 -u pi_car.py --esp /dev/serial0 --rotate180 --bitrate 3000000 --max-throttle 1 --max-reverse 1 --url ws://127.0.0.1:8080/ws/car
+Restart=always
+RestartSec=2
+TimeoutStopSec=3
+
+[Install]
+WantedBy=multi-user.target

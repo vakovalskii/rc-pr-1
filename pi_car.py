@@ -9,7 +9,8 @@
     python3 pi_car.py --esp auto --url ws://...                    # ход и руль через ESP8266 по USB
 
 Что делает:
-  * камера через picamera2, аппаратный MJPEG, полный угол сенсора (1296x972 -> 640x480);
+  * камера через picamera2, аппаратный MJPEG, полный угол сенсора (1296x972 -> 640x480 по умолчанию,
+    размер, частота и битрейт меняются с пульта и запоминаются в video.json);
   * ШИМ 50 Гц аппаратный (dtoverlay pwm-2chan): ESC на GPIO12, серва на GPIO13;
   * FAILSAFE: нет команд 500 мс или пропала связь -> газ в нейтраль, руль в центр;
   * при старте 2 с нейтрали — ESC без неё не взводится;
@@ -92,6 +93,7 @@ class EspDrive:
         self.port, self.a = port, a
         self.steer = self.throttle = 0.0
         self.id, self.tele, self.tele_at = 0, {}, 0.0
+        self.odo = None                                   # одометрия появляется с прошивкой, где есть датчик Холла
         self.ser = serial.Serial()
         self.ser.port, self.ser.baudrate, self.ser.timeout, self.ser.write_timeout = port, 115200, 0.2, 0.1
         self.ser.dtr = self.ser.rts = False                   # не дёргать reset NodeMCU при открытии
@@ -99,7 +101,7 @@ class EspDrive:
         threading.Thread(target=self._rx, daemon=True).start()
 
     def _rx(self):
-        # t,ack,pot,esc_us,motor,fs,mode,potL,potC,potR,inv,max,src,acc,brk
+        # t,ack,pot,esc_us,motor,fs,mode,potL,potC,potR,inv,max,src,acc,brk,pwm,kp,minpwm,brake_us,brake_ms,hall_n,hall_dt_us
         while True:
             try: line = self.ser.readline().decode(errors="replace").strip()
             except Exception: time.sleep(0.5); continue
@@ -114,6 +116,14 @@ class EspDrive:
                         self.tele.update(steer_pwm_max=int(p[15]), steer_kp=int(p[16]), steer_min_pwm=int(p[17]))
                     if len(p) >= 20:                       # прошивка с активным тормозом
                         self.tele.update(brake_us=int(p[18]), brake_ms=int(p[19]))
+                    if len(p) >= 22:                       # прошивка с датчиком Холла на заднем кардане
+                        if self.odo is None:
+                            from odometry import Odometry
+                            self.odo = Odometry(); print(f"одометрия: журнал {self.odo.path}")
+                        n, dt = int(p[20]), int(p[21])
+                        self.tele.update(hall_n=n, hall_dt_us=dt, **self.odo.update(
+                            time.time(), n, dt, self.tele["pot"], self.tele["potL"], self.tele["potC"], self.tele["potR"],
+                            self.tele["esc_us"], self.throttle, self.steer))
                     self.tele_at = time.monotonic()
                 except ValueError: pass
             elif line and not line.startswith("t,"):
@@ -160,26 +170,72 @@ class Latest:
         await self.ev.wait(); self.ev.clear()
         return self.frame
 
-def start_picamera(sink, a):
-    from picamera2 import Picamera2
-    from picamera2.encoders import MJPEGEncoder
-    from picamera2.outputs import FileOutput
+# Качество видео меняется с пульта на лету: {"type":"video","w":..,"h":..,"fps":..,"mbit":..}.
+# Последний выбор лежит в video.json рядом со скриптом и переживает перезапуск сервиса.
+SIZES = ((320, 240), (480, 360), (640, 480), (800, 600), (960, 720), (1296, 972))
+VIDEO_FILE = pathlib.Path(__file__).with_name("video.json")
 
-    class Out(io.BufferedIOBase):
-        def write(self, buf):
-            sink.put(bytes(buf)); return len(buf)
+def video_clamp(v, cur):
+    v = {**cur, **{k: v[k] for k in ("w", "h", "fps", "mbit", "exp_us", "gain") if k in v}}
+    w, h = min(SIZES, key=lambda s: abs(s[0] - int(v["w"])))      # только размеры 4:3 из списка: аппаратный кодер их любит
+    return {"w": w, "h": h, "fps": max(5, min(40, int(v["fps"]))),  # 40 — потолок сенсора в режиме 1296x972
+            "mbit": round(max(0.3, min(15.0, float(v["mbit"]))), 1),
+            "exp_us": max(0, min(30000, int(v.get("exp_us", 8000)))),   # выдержка, 0 — авто
+            "gain": max(0.0, min(16.0, float(v.get("gain", 0))))}        # усиление, 0 — авто (при ручной выдержке)
 
-    cam = Picamera2()
-    cfg = cam.create_video_configuration(
-        main={"size": (a.width, a.height), "format": "YUV420"},
-        sensor={"output_size": (1296, 972)},               # биннинг всего сенсора: весь угол 160°
-        controls={"FrameRate": a.fps}, buffer_count=3)   # меньше буферов — меньше кадров в пути
-    if a.rotate180:
-        from libcamera import Transform
-        cfg["transform"] = Transform(hflip=1, vflip=1)
-    cam.configure(cfg)
-    cam.start_recording(MJPEGEncoder(bitrate=a.bitrate), FileOutput(Out()))
-    return cam
+class Video:
+    """Камера picamera2 + аппаратный MJPEG. set() перезапускает запись с новыми размером, частотой и битрейтом (~0.3 с)."""
+    def __init__(self, sink, a):
+        self.sink, self.rot, self.cam = sink, a.rotate180, None
+        self.cfg = video_clamp({}, {"w": a.width, "h": a.height, "fps": a.fps, "mbit": a.bitrate / 1e6})
+        try: self.cfg = video_clamp(json.loads(VIDEO_FILE.read_text()), self.cfg)
+        except Exception: pass
+
+    def start(self):
+        from picamera2 import Picamera2
+        from picamera2.encoders import MJPEGEncoder
+        from picamera2.outputs import FileOutput
+        sink = self.sink
+
+        class Out(io.BufferedIOBase):
+            def write(self, buf):
+                sink.put(bytes(buf)); return len(buf)
+
+        c = self.cfg
+        if self.cam is None: self.cam = Picamera2()
+        cfg = self.cam.create_video_configuration(
+            main={"size": (c["w"], c["h"]), "format": "YUV420"},
+            sensor={"output_size": (1296, 972)},               # биннинг всего сенсора: весь угол 160°
+            controls={"FrameRate": c["fps"]}, buffer_count=3)   # меньше буферов — меньше кадров в пути
+        if self.rot:
+            from libcamera import Transform
+            cfg["transform"] = Transform(hflip=1, vflip=1)
+        self.cam.configure(cfg)
+        self.cam.start_recording(MJPEGEncoder(bitrate=int(c["mbit"] * 1e6)), FileOutput(Out()))
+        # Смаз на ходу: дома автоэкспозиция берёт 30–66 мс, и на повороте кадр — каша (нейронки видят мыло).
+        # Выдержку фиксируем короткой, яркость добирает усиление (шумнее, но резко). libcamera ≥ 0.5: ExposureTimeMode.
+        if c.get("exp_us"):
+            g = {"AnalogueGainMode": 1, "AnalogueGain": c["gain"]} if c.get("gain") else {"AnalogueGainMode": 0}
+            try: self.cam.set_controls({"ExposureTimeMode": 1, "ExposureTime": c["exp_us"], **g})
+            except Exception as e:
+                print(f"видео: ручная выдержка не взлетела ({e}), режим short")
+                from libcamera import controls
+                self.cam.set_controls({"AeExposureMode": controls.AeExposureModeEnum.Short})
+        print(f"видео: {c['w']}x{c['h']} {c['fps']} к/с {c['mbit']} Мбит/с, выдержка {c.get('exp_us') or 'авто'} мкс, усиление {c.get('gain') or 'авто'}")
+
+    def set(self, v):
+        new = video_clamp(v, self.cfg)
+        if new == self.cfg: return
+        old, self.cfg = self.cfg, new
+        try:
+            self.cam.stop_recording(); self.start()
+        except Exception as e:                            # не взлетело — откат к прежнему
+            print(f"видео: {new} не вышло ({e}), откат"); self.cfg = old
+            try: self.cam.stop_recording()
+            except Exception: pass
+            self.start()
+        try: VIDEO_FILE.write_text(json.dumps(self.cfg))
+        except Exception: pass
 
 async def fake_camera(sink, a, drive):
     from PIL import Image, ImageDraw
@@ -235,11 +291,12 @@ async def main(a):
         print(f"ШИМ: {'фейк' if a.dry_run else pwm.chip}. Нейтраль 2 с — взводим ESC ...")
     await asyncio.sleep(0 if a.dry_run else 2.0)
 
-    sink = Latest(loop)
+    sink = Latest(loop); video = None
     state = {"last_cmd": -1.0, "id": -1, "failsafe": True, "health": {}, "online": False, "cam": "ok"}
     if a.dry_run: asyncio.create_task(fake_camera(sink, a, drive))
     else:
-        try: cam = start_picamera(sink, a)
+        video = Video(sink, a)
+        try: video.start()
         except Exception as e:                            # без камеры всё равно рулим и шлём телеметрию
             state["cam"] = "не найдена (шлейф?)"; print(f"КАМЕРА НЕ ЗАПУСТИЛАСЬ: {e}")
 
@@ -273,6 +330,10 @@ async def main(a):
             async for raw in ws:
                 try: m = json.loads(raw)
                 except Exception: continue
+                if m.get("type") == "video":
+                    if video is not None and video.cam is not None:
+                        await loop.run_in_executor(None, video.set, m)
+                    continue
                 if m.get("type") == "esp" and hasattr(drive, "raw"):
                     drive.raw(m.get("cmd", "")); continue
                 if m.get("type", "cmd") != "cmd": continue
@@ -291,7 +352,7 @@ async def main(a):
                                           **({"ft": round(ft * 1000)} if jpeg is not None else {}),
                                           "thr": round(drive.throttle, 2), "steer": round(drive.steer, 2),
                                           "esc_us": round(esc_us), "servo_us": round(servo_us),
-                                          "cam": state["cam"],
+                                          "cam": state["cam"], **({"vid": video.cfg} if video else {}),
                                           **(drive.status() if hasattr(drive, "status") else {}), **state["health"]}))
                 seq += 1
 

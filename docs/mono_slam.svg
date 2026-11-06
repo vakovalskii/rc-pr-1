@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1400" viewBox="0 0 2000 1400" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#3a3f46"/></marker>
+    <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2f6fb5"/></marker>
+    <marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1f7a3a"/></marker>
+  </defs>
+  <rect width="2000" height="1400" fill="#f7f7f5"/>
+  <text x="40" y="60" font-size="36" font-weight="bold" fill="#1b1f24">RC-багги: SLAM на одной камере + Холл + VLM — как она решает, куда ехать</text>
+  <text x="40" y="96" font-size="21" fill="#5b6058">Борт тонкий (Pi 4 + ESP8266), всё думание на маке (mono_slam.py). Цифры — живые замеры 06.11.2026.</text>
+
+  <!-- ===== БОРТ ===== -->
+  <rect x="40" y="130" width="560" height="560" rx="16" fill="#262626"/>
+  <text x="64" y="172" font-size="28" font-weight="bold" fill="#fff">Борт</text>
+  <text x="64" y="200" font-size="18" fill="#bdbdbd">Pi 4 (pi_car.py) + ESP8266</text>
+
+  <rect x="64" y="222" width="512" height="112" rx="10" fill="#3a3a3a"/>
+  <text x="84" y="254" font-size="21" font-weight="bold" fill="#f2c94c">Камера OV5647, широкий угол</text>
+  <text x="84" y="282" font-size="17" fill="#e0e0e0">480×360, 15 к/с, MJPEG 2.5 Мбит/с</text>
+  <text x="84" y="306" font-size="17" fill="#e0e0e0">выдержка 12 мс + усиление 16 (было авто 30–66 мс — смаз)</text>
+  <text x="84" y="326" font-size="15" fill="#a9a9a9">12 см над полом, смотрит вверх на 13°, только вперёд</text>
+
+  <rect x="64" y="350" width="512" height="128" rx="10" fill="#3a3a3a"/>
+  <text x="84" y="382" font-size="21" font-weight="bold" fill="#6fdc8c">ESP8266: Холл + руль + ход</text>
+  <text x="84" y="410" font-size="17" fill="#e0e0e0">датчик Холла на заднем правом колесе (D2), 2 магнита</text>
+  <text x="84" y="434" font-size="17" fill="#e0e0e0">≈13 см на импульс; потенциометр руля (A0)</text>
+  <text x="84" y="458" font-size="17" fill="#e0e0e0">газ ≤19%, руль 100%, failsafe 300 мс</text>
+
+  <rect x="64" y="494" width="512" height="100" rx="10" fill="#3a3a3a"/>
+  <text x="84" y="526" font-size="21" font-weight="bold" fill="#8cc8f0">Одометрия (odometry.py)</text>
+  <text x="84" y="554" font-size="17" fill="#e0e0e0">импульсы × м/имп, кривизна по рулю (велосипед)</text>
+  <text x="84" y="578" font-size="17" fill="#e0e0e0">→ odo_x, odo_y, курс в телеметрии</text>
+
+  <rect x="64" y="610" width="512" height="60" rx="10" fill="#1f3550"/>
+  <text x="84" y="648" font-size="19" font-weight="bold" fill="#fff">релей :8080 — кадры + телеметрия + команды</text>
+
+  <!-- борт → мак -->
+  <line x1="600" y1="400" x2="690" y2="400" stroke="#3a3f46" stroke-width="5" marker-end="url(#ar)"/>
+  <text x="604" y="384" font-size="16" fill="#3a3f46">Wi-Fi</text>
+  <polyline points="700,1250 680,1250 680,640 604,640" fill="none" stroke="#1f7a3a" stroke-width="5" marker-end="url(#arg)"/>
+  <text x="674" y="1000" font-size="16" fill="#1f7a3a" transform="rotate(-90 674 1000)">руль и газ — 10 раз/с</text>
+
+  <!-- ===== МАК: ВОСПРИЯТИЕ ===== -->
+  <rect x="700" y="130" width="1260" height="560" rx="16" fill="#ffffff" stroke="#c9cdc4" stroke-width="2"/>
+  <text x="724" y="172" font-size="28" font-weight="bold" fill="#1b1f24">Мак (M1, MPS): восприятие — «что вокруг и где я»</text>
+
+  <g font-size="17" fill="#1b1f24">
+    <rect x="724" y="196" width="280" height="130" rx="10" fill="#f0efe9" stroke="#c9cdc4"/>
+    <text x="740" y="226" font-size="20" font-weight="bold">1. Выпрямление</text>
+    <text x="740" y="254">широкоугольник → обычная</text>
+    <text x="740" y="276">камера 100°, 384×288</text>
+    <text x="740" y="300" fill="#5b6058">бампер внизу вырезан</text>
+
+    <rect x="1030" y="196" width="300" height="130" rx="10" fill="#fff4e0" stroke="#d98a00"/>
+    <text x="1046" y="226" font-size="20" font-weight="bold">2. Depth Anything V2</text>
+    <text x="1046" y="254">Metric Indoor Small, ~35 мс</text>
+    <text x="1046" y="276">её метры врут (учили на</text>
+    <text x="1046" y="298">высоте человека) → берём форму</text>
+
+    <rect x="1356" y="196" width="280" height="130" rx="10" fill="#eaf5ec" stroke="#1f7a3a"/>
+    <text x="1372" y="226" font-size="20" font-weight="bold">3. Пол</text>
+    <text x="1372" y="254">RANSAC-плоскость →</text>
+    <text x="1372" y="276">маска «пол / не пол»</text>
+    <text x="1372" y="300" fill="#5b6058">медиана по 3 кадрам</text>
+
+    <rect x="1662" y="196" width="276" height="130" rx="10" fill="#eaf5ec" stroke="#1f7a3a"/>
+    <text x="1678" y="226" font-size="20" font-weight="bold">4. Скан, как лидар</text>
+    <text x="1678" y="254">низ препятствия в каждом</text>
+    <text x="1678" y="276">столбце → метры геометрией</text>
+    <text x="1678" y="300">(12 см, 13°) + нависания</text>
+
+    <line x1="1004" y1="261" x2="1026" y2="261" stroke="#3a3f46" stroke-width="3" marker-end="url(#ar)"/>
+    <line x1="1330" y1="261" x2="1352" y2="261" stroke="#3a3f46" stroke-width="3" marker-end="url(#ar)"/>
+    <line x1="1636" y1="261" x2="1658" y2="261" stroke="#3a3f46" stroke-width="3" marker-end="url(#ar)"/>
+
+    <rect x="1356" y="356" width="582" height="130" rx="10" fill="#eef3fb" stroke="#2f6fb5"/>
+    <text x="1372" y="386" font-size="20" font-weight="bold">5. Где я: одометрия + подгонка к карте</text>
+    <text x="1372" y="414">сдвиг с прошлого кадра по Холлу и рулю,</text>
+    <text x="1372" y="436">скан подгоняется к карте (±12 см, ±6°) → поза</text>
+    <text x="1372" y="460" fill="#5b6058">сетка проходимости 5 см, путь, карта в data/mono-*</text>
+    <line x1="1800" y1="326" x2="1800" y2="352" stroke="#3a3f46" stroke-width="3" marker-end="url(#ar)"/>
+
+    <rect x="724" y="356" width="606" height="150" rx="10" fill="#e8f2fb" stroke="#2f6fb5"/>
+    <text x="740" y="386" font-size="20" font-weight="bold">VLM qwen3.6-35b-a3b-noreason (neuraldeep)</text>
+    <text x="740" y="414">кадр + история 4 ответов + размеры машинки →</text>
+    <text x="740" y="436">JSON: сцена, слева/центр/справа, куда ехать,</text>
+    <text x="740" y="458">вероятности left/straight/right/back, люди</text>
+    <text x="740" y="482" fill="#5b6058">~0.7 с, 2 запроса в полёте → ~1.5 ответа/с, temp 0</text>
+
+    <rect x="724" y="528" width="606" height="140" rx="10" fill="#e8f2fb" stroke="#2f6fb5"/>
+    <text x="740" y="558" font-size="20" font-weight="bold">Решатель clef-flash (/v1/decisions)</text>
+    <text x="740" y="586">текст: «свободно влево/прямо/вправо, сзади по</text>
+    <text x="740" y="608">карте, что видит VLM» → вероятности 4 направлений</text>
+    <text x="740" y="632" fill="#5b6058">картинку не видит; ~0.05–0.2 с, 4 раза/с</text>
+    <text x="740" y="654" fill="#5b6058">— второе мнение поверх скана и VLM</text>
+    <line x1="1027" y1="506" x2="1027" y2="524" stroke="#2f6fb5" stroke-width="3" marker-end="url(#arb)"/>
+
+    <rect x="1356" y="510" width="582" height="158" rx="10" fill="#f0efe9" stroke="#c9cdc4"/>
+    <text x="1372" y="540" font-size="20" font-weight="bold">Экран http://localhost:8091/</text>
+    <text x="1372" y="568">камера + карта + глубина + пол + кадр VLM</text>
+    <text x="1372" y="590">текстом: шансы каждой дуги руля, мнения моделей</text>
+    <text x="1372" y="612">в %, задержки, журнал решений и ответов VLM</text>
+    <text x="1372" y="636" fill="#5b6058">всё можно выделить и скопировать</text>
+  </g>
+
+  <!-- восприятие → решение -->
+  <line x1="1640" y1="690" x2="1500" y2="760" stroke="#3a3f46" stroke-width="5" marker-end="url(#ar)"/>
+  <line x1="1027" y1="690" x2="1100" y2="760" stroke="#2f6fb5" stroke-width="5" marker-end="url(#arb)"/>
+
+  <!-- ===== РЕШЕНИЕ ===== -->
+  <rect x="700" y="764" width="1260" height="600" rx="16" fill="#1d2b22"/>
+  <text x="724" y="806" font-size="28" font-weight="bold" fill="#fff">Автопилот: каскад решений, 10 раз в секунду</text>
+  <text x="724" y="834" font-size="18" fill="#b9d6c0">Главное слово — у скана (метры, свежие). Модели только подсказывают «куда хочется». Страховку не трогает никто.</text>
+
+  <g font-size="18" fill="#e6efe8">
+    <text x="724" y="878" font-size="20" font-weight="bold" fill="#6fdc8c">1. Дуги руля</text>
+    <text x="724" y="904">7 положений: −1 … +1. По каждой — сколько проедем до того, как нос (бампер, 30 см от задней оси, ширина 28 см) упрётся.</text>
+    <text x="724" y="928" fill="#9fbfa8">Скан + память только «слепой зоны» под бампером и по бокам (3 с).</text>
+
+    <text x="724" y="970" font-size="20" font-weight="bold" fill="#8cc8f0">2. «Куда хочется»</text>
+    <text x="724" y="996">среднее вероятностей VLM (за 3 с) и clef-flash → сдвиг руля; вес до 0.25 и растёт с уверенностью</text>
+    <text x="724" y="1020" fill="#9fbfa8">(свободный метр весит 1.0 — модели выбирают между похожими дугами, но не уводят в стену).</text>
+
+    <text x="724" y="1062" font-size="20" font-weight="bold" fill="#f2c94c">3. Оценка и шанс</text>
+    <text x="724" y="1088">оценка = свободно (до 1 м) − 0.25·|смена руля| − вес·|отклонение от «хочется»| → softmax → % каждой дуги</text>
+
+    <text x="724" y="1130" font-size="20" font-weight="bold" fill="#ff8a7a">4. Страховка (жёстко, по порядку)</text>
+    <text x="744" y="1158">• впереди ≥ 30 см — едем по лучшей дуге (газ 1.0 = 19% ESP, тише у стен и при людях)</text>
+    <text x="744" y="1184">• тупик — вперёд на полном упоре руля, если там ≥ 25 см (туда смотрит камера)</text>
+    <text x="744" y="1210">• назад — только туда, где карта видела пол или сами проехали, по счёту импульсов колеса</text>
+    <text x="744" y="1236">• колесо 0.7 с не крутится назад → «сзади упор», 6 с назад не ездим; вперёд 2.5 с стоит → упор</text>
+    <text x="744" y="1262">• сзади карта пуста — осторожно на 1 импульс (~13 см); иначе стоп: «помоги стиком»</text>
+    <text x="744" y="1288">• стик в пульте — автопилот сразу отдаёт управление человеку</text>
+    <text x="724" y="1332" font-size="18" fill="#9fbfa8">Исследовано (свободного пола за 60 с прибавилось &lt; 3%, но не раньше 2 мин) → едет в середину свободного места и встаёт.</text>
+  </g>
+
+  <!-- ===== Слабые места ===== -->
+  <rect x="40" y="720" width="610" height="644" rx="16" fill="#fff4e0" stroke="#d98a00" stroke-width="2"/>
+  <text x="64" y="762" font-size="26" font-weight="bold" fill="#8a5300">Что пока слабо и что дальше</text>
+  <g font-size="18" fill="#1b1f24">
+    <text x="64" y="804">• Курс только по рулю: карта плывёт.</text>
+    <text x="84" y="828" fill="#5b6058">→ поворот по камере (оптический поток) или</text>
+    <text x="84" y="852" fill="#5b6058">   гироскоп BNO085 + фильтр «колесо + гироскоп».</text>
+    <text x="64" y="890">• Колесо: 13 см на импульс, бывают ложные.</text>
+    <text x="84" y="914" fill="#5b6058">→ 4–8 магнитов, скорость по периоду между</text>
+    <text x="84" y="938" fill="#5b6058">   импульсами, калибровка «5 м прямо».</text>
+    <text x="64" y="976">• Сзади камеры нет; реверс слабый (19%).</text>
+    <text x="84" y="1000" fill="#5b6058">→ разворот вперёд в приоритете; лидар C1.</text>
+    <text x="64" y="1038">• Наклон 13° и высота 12 см — на глаз.</text>
+    <text x="84" y="1062" fill="#5b6058">→ замер: носом в стену ровно на 1 м.</text>
+    <text x="64" y="1100">• Блики кафеля, тёмные углы — ложные стены.</text>
+    <text x="84" y="1124" fill="#5b6058">→ SegFormer «пол» + маска бликов, отбраковка</text>
+    <text x="84" y="1148" fill="#5b6058">   смазанных кадров по резкости.</text>
+    <text x="64" y="1186">• Цель «карта за 2 минуты»:</text>
+    <text x="84" y="1210" fill="#5b6058">→ ехать к границе неизведанного (фронтиры),</text>
+    <text x="84" y="1234" fill="#5b6058">   замыкание петли, метрики каждого заезда:</text>
+    <text x="84" y="1258" fill="#5b6058">   м² за 60/120 с, доля подгонок, ошибка</text>
+    <text x="84" y="1282" fill="#5b6058">   возврата на старт.</text>
+    <text x="64" y="1320" font-size="16" fill="#8a5300">Каждый заезд пишется в data/mono-*/ (кадры, телеметрия,</text>
+    <text x="64" y="1342" font-size="16" fill="#8a5300">ответы VLM) — можно прогнать заново (--replay).</text>
+  </g>
+</svg>

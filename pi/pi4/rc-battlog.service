@@ -1,0 +1,10 @@
+[Unit]
+Description=RC-багги: журнал работы от аккумулятора (~/battery.log раз в 30 с)
+
+[Service]
+User=pi
+ExecStart=/bin/sh /home/pi/rc/batt_log.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

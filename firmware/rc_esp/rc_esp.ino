@@ -9,6 +9,7 @@
 //   D5 (GPIO14) -> IN1 драйвера моторчика руля
 //   D6 (GPIO12) -> IN2 драйвера моторчика руля
 //   A0          <- движок потенциометра сервы (крайние на 3V3 и GND, не 5 В!)
+//   D2 (GPIO4)  <- датчик Холла на заднем кардане (KY-003 S / KY-024 D0, питание 3V3): импульс на каждый магнит
 //
 // Руль 5-проводной сервы: режим 0 выкл, 1 ручной (стик = ШИМ моторчика; отпустил стик —
 // после калибровки колёса сами доезжают в центр по потенциометру), 2 по потенциометру
@@ -19,7 +20,8 @@
 //   mode,<0|1|2>  cal,<l|c|r>  inv  max,<0..1000>  acc,<мс>  brk,<мс>  калибровка и настройки
 //   pwm,<200..1000> сила руля (потолок ШИМ моторчика)   kp,<1..30> жёсткость удержания   minpwm,<0..800>
 //   brake,<мкс>,<мс>  активный тормоз при отпускании газа (импульс «назад» силой мкс на мс; 0 — выкл)
-// Ответ: t,<ack>,<pot>,<esc_us>,<мотор>,<failsafe>,<mode>,<potL>,<potC>,<potR>,<inv>,<max>,<источник>,<разгон мс>,<торможение мс>,<pwm>,<kp>,<minpwm>,<тормоз мкс>,<тормоз мс>
+// Ответ: t,<ack>,<pot>,<esc_us>,<мотор>,<failsafe>,<mode>,<potL>,<potC>,<potR>,<inv>,<max>,<источник>,<разгон мс>,<торможение мс>,<pwm>,<kp>,<minpwm>,<тормоз мкс>,<тормоз мс>,
+//        <импульсов Холла со старта, со знаком хода>,<период импульсов, мкс; 0 — вал стоит>
 
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
@@ -32,7 +34,7 @@
 const char* AP_SSID = "RC-BUGGY";
 const char* AP_PASS = "12345678";
 
-const int PIN_ESC = 5, PIN_IN1 = 14, PIN_IN2 = 12, PIN_LED = 2;
+const int PIN_ESC = 5, PIN_IN1 = 14, PIN_IN2 = 12, PIN_LED = 2, PIN_HALL = 4;
 const uint32_t FAILSAFE_MS = 300;
 
 struct Cfg { uint32_t magic; int16_t potL, potC, potR; uint8_t inv, mode; int16_t maxThr, kp, db, maxPwm, minPwm, accMs, brkMs;
@@ -69,6 +71,33 @@ float speedEst = 0;                                          // оценка с�
 const float SPEED_TAU_MS = 500;
 const uint32_t FLIP_HOLD_MS = 150, FAILSAFE_STOP_MS = 150;
 const char* src = "-";
+
+// Датчик Холла: прерывание на каждый магнит. Направления датчик не знает — знак берём из газа:
+// пока газ вперёд, импульсы +1, назад — −1; накат и тормоз противоходом (thrOut = 0) знак не меняют.
+volatile int32_t hallN = 0;
+volatile uint32_t hallLastUs = 0, hallPrevUs = 0, hallDtUs = 0, hallHighSince = 0;
+volatile int8_t hallDir = 1;
+// Дребезг: пока магнит медленно идёт мимо порога, выход датчика дёргается (у KY-024 компаратор без гистерезиса),
+// и мотор наводит иголки. Засчитываем спад, только если перед ним «без магнита» держалось HALL_ARM_US,
+// и не чаще HALL_MIN_US (3 мс ≈ 70 км/ч при ~6 см на импульс — быстрее машинка не ездит).
+const uint32_t HALL_MIN_US = 3000, HALL_ARM_US = 1000;
+const uint32_t HALL_STOP_US = 1000000;                       // секунду без импульса — вал стоит
+IRAM_ATTR void onHall() {
+  uint32_t t = micros();
+  if (digitalRead(PIN_HALL)) { hallHighSince = t; return; }  // магнит ушёл — ждём следующий
+  if (t - hallHighSince < HALL_ARM_US || t - hallLastUs < HALL_MIN_US) return;
+  // период — среднее за два импульса (полный оборот при двух магнитах): магниты редко стоят ровно
+  // напротив, и интервалы чередуются короткий/длинный, а скорость от этого скакать не должна
+  uint32_t dt = hallPrevUs ? (t - hallPrevUs) / 2 : t - hallLastUs;
+  hallN += hallDir; hallDtUs = dt; hallPrevUs = hallLastUs; hallLastUs = t;
+}
+// период для телеметрии: если новый импульс запаздывает, растёт и период — скорость плавно падает к нулю
+uint32_t hallPeriod() {
+  noInterrupts(); uint32_t last = hallLastUs, dt = hallDtUs; interrupts();
+  uint32_t since = micros() - last;
+  if (!dt || since > HALL_STOP_US) { if (since > HALL_STOP_US) hallPrevUs = 0; return 0; }
+  return max(dt, since);
+}
 
 int readPot() { return (analogRead(A0) + analogRead(A0)) / 2; }
 
@@ -114,6 +143,7 @@ void control() {
   else if (thrOut > target) thrOut = max(thrOut - step, (float)target);
   if (thrOut == 0) { if (!zeroSince) zeroSince = now; } else { zeroSince = 0; lastSign = thrOut > 0 ? 1 : -1; }
   if (thrOut == 0 && zeroSince && now - zeroSince >= FLIP_HOLD_MS) lastSign = 0;
+  if (thrOut > 0) hallDir = 1; else if (thrOut < 0) hallDir = -1;
   escUs = 1500 + (int)(thrOut / 2);                          // ±1000 -> ±500 мкс
   esc.writeMicroseconds(escUs);
   }
@@ -181,9 +211,11 @@ void handle(char* s, const char* from) {
 }
 
 String tele() {
-  char b[160];
-  snprintf(b, sizeof b, "t,%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d,%d,%d,%d,%d,%d", (long)lastId, pot, escUs, motorOut, failsafe,
-           cfg.mode, cfg.potL, cfg.potC, cfg.potR, cfg.inv, cfg.maxThr, src, cfg.accMs, cfg.brkMs, cfg.maxPwm, cfg.kp, cfg.minPwm, cfg.brakeUs, cfg.brakeMs);
+  char b[192];
+  noInterrupts(); int32_t n = hallN; interrupts();
+  snprintf(b, sizeof b, "t,%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d,%d,%d,%d,%d,%d,%ld,%lu", (long)lastId, pot, escUs, motorOut, failsafe,
+           cfg.mode, cfg.potL, cfg.potC, cfg.potR, cfg.inv, cfg.maxThr, src, cfg.accMs, cfg.brkMs, cfg.maxPwm, cfg.kp, cfg.minPwm, cfg.brakeUs, cfg.brakeMs,
+           (long)n, (unsigned long)hallPeriod());
   return String(b);
 }
 
@@ -197,6 +229,8 @@ void setup() {
   analogWriteRange(1000); analogWriteFreq(10000);
   setMotor(0);
   esc.attach(PIN_ESC, 1000, 2000); esc.writeMicroseconds(1500);   // нейтраль сразу: регулятор взводится
+  pinMode(PIN_HALL, INPUT_PULLUP);                                 // у KY-003 своя подтяжка, лишней не будет
+  attachInterrupt(digitalPinToInterrupt(PIN_HALL), onHall, CHANGE);
   Serial.begin(115200);
   cfgLoad();
 
